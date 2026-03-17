@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -106,22 +107,33 @@ func main() {
 	s.AddTool(tools.SmritiRecallTool(), tools.HandleSmritiRecall(engine))
 	s.AddTool(tools.SmritiManageTool(), tools.HandleSmritiManage(engine, bp))
 
+	var shutdownOnce sync.Once
+	shutdown := func() {
+		shutdownOnce.Do(func() {
+			log.Println("shutting down...")
+			cancel()
+			engine.Stop()
+			if err := bp.Push(context.Background()); err != nil {
+				log.Printf("final backup push error: %v", err)
+			}
+			bp.Close()
+			store.Close()
+			log.Println("shutdown complete")
+		})
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		log.Println("shutting down...")
-		if err := bp.Push(context.Background()); err != nil {
-			log.Printf("final backup push error: %v", err)
-		}
-		bp.Close()
-		cancel()
+		shutdown()
 		os.Exit(0)
 	}()
 
 	fmt.Fprintf(os.Stderr, "SmritiMCP server started for user=%s db=%s backup=%s\n", cfg.User, cfg.DBPath, cfg.BackupType)
 
 	if err := server.ServeStdio(s); err != nil {
-		log.Fatalf("server error: %v", err)
+		log.Printf("server error: %v", err)
 	}
+	shutdown()
 }
