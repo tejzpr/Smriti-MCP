@@ -17,7 +17,7 @@ jobs:
             goos: linux
             goarch: amd64
             suffix: linux-amd64
-          - runner: macos-13
+          - runner: macos-latest
             goos: darwin
             goarch: amd64
             suffix: darwin-amd64
@@ -41,8 +41,8 @@ jobs:
 
       - name: Download LadybugDB native library
         run: |
-          LBUG_DIR=$(go env GOMODCACHE)/github.com/!ladybug!d!b/go-ladybug@$(grep 'go-ladybug' go.sum | head -1 | awk '{print $2}' | sed 's|/go.mod||')
-          chmod +x "$LBUG_DIR/download_lbug.sh"
+          LBUG_DIR=$(go mod download -json github.com/LadybugDB/go-ladybug@v0.13.1 | grep '"Dir"' | cut -d'"' -f4)
+          chmod -R u+w "$LBUG_DIR"
           cd "$LBUG_DIR" && bash download_lbug.sh
         shell: bash
 
