@@ -50,6 +50,7 @@ func main() {
 		LLMModel:     cfg.LLMModel,
 		LLMAPIKey:    cfg.LLMAPIKey,
 		EmbedBaseURL: cfg.EmbeddingBaseURL,
+		EmbedAPIKey:  cfg.EmbeddingAPIKey,
 		EmbedModel:   cfg.EmbeddingModel,
 		EmbedDims:    cfg.EmbeddingDims,
 	})
