@@ -1,0 +1,42 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+smriti-mcp
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LadybugDB native libraries (downloaded at build time)
+lib-ladybug/
+
+# LadybugDB data files (user data)
+*.lbug/
+
+# Environment files
+.env
+.env.*
+
+# Temporary files
+tmp/

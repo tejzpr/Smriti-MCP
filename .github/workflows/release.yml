@@ -1,0 +1,75 @@
+name: Release Binaries
+
+on:
+  release:
+    types: [ published ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            zig_target: x86_64-linux-musl
+          - os: linux
+            arch: arm64
+            zig_target: aarch64-linux-musl
+          - os: darwin
+            arch: amd64
+            zig_target: x86_64-macos
+          - os: darwin
+            arch: arm64
+            zig_target: aarch64-macos
+          - os: windows
+            arch: amd64
+            zig_target: x86_64-windows-gnu
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 1
+          CC: zig cc -target ${{ matrix.zig_target }}
+          CXX: zig c++ -target ${{ matrix.zig_target }}
+        run: |
+          EXT=""
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            EXT=".exe"
+          fi
+          OUTPUT="smriti-mcp-${{ matrix.os }}-${{ matrix.arch }}${EXT}"
+          go build -trimpath -ldflags="-s -w -extldflags '-static'" -o "${OUTPUT}" .
+          chmod +x "${OUTPUT}" 2>/dev/null || true
+
+      - name: Generate checksums
+        run: |
+          FILE="smriti-mcp-${{ matrix.os }}-${{ matrix.arch }}"
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            FILE="${FILE}.exe"
+          fi
+          sha256sum "${FILE}" > "${FILE}.sha256"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            smriti-mcp-${{ matrix.os }}-${{ matrix.arch }}*
