@@ -233,7 +233,7 @@ Download pre-built binaries from the [Releases](https://github.com/tejzpr/smriti
 | Platform | Architecture | CGO |
 |----------|-------------|-----|
 | Linux | amd64 | Enabled (native) |
-| macOS | amd64 (Intel), arm64 (Apple Silicon) | Enabled (native) |
+| macOS | arm64 (Apple Silicon) | Enabled (native) |
 | Windows | amd64 | Enabled (native) |
 
 Each release includes a `checksums-sha256.txt` for verification.
