@@ -80,17 +80,16 @@ func (e *Engine) fanOutCueSearch(entities, keywords []string, seen map[string]*S
 	allCues = append(allCues, keywords...)
 
 	for _, cueName := range allCues {
-		query := fmt.Sprintf(`
-			MATCH (e:Engram)-[:EncodedBy]->(c:Cue)
-			WHERE c.name = '%s'
+		rows, err := e.store.PreparedQueryRows(
+			`MATCH (e:Engram)-[:EncodedBy]->(c:Cue)
+			WHERE c.name = $cueName
 			RETURN e.id AS id, e.content AS content, e.summary AS summary,
 				e.memory_type AS memory_type, e.importance AS importance,
 				e.access_count AS access_count, e.decay_factor AS decay_factor,
 				e.embedding AS embedding, e.source AS source, e.tags AS tags,
 				e.created_at AS created_at, e.last_accessed_at AS last_accessed_at`,
-			escapeCypher(cueName),
+			map[string]any{"cueName": cueName},
 		)
-		rows, err := e.store.QueryRows(query)
 		if err != nil {
 			continue
 		}
@@ -194,31 +193,36 @@ func (e *Engine) multiHopExpand(seen map[string]*SearchResult, maxHops int) erro
 		for id := range seen {
 			currentIDs = append(currentIDs, id)
 		}
+		if len(currentIDs) == 0 {
+			break
+		}
 
-		for _, id := range currentIDs {
-			query := fmt.Sprintf(`
-				MATCH (e1:Engram {id: '%s'})-[r:AssociatedWith]->(e2:Engram)
-				WHERE r.strength > 0.5
-				RETURN e2.id AS id, e2.content AS content, e2.summary AS summary,
-					e2.memory_type AS memory_type, e2.importance AS importance,
-					e2.access_count AS access_count, e2.decay_factor AS decay_factor,
-					e2.embedding AS embedding, e2.source AS source, e2.tags AS tags,
-					e2.created_at AS created_at, e2.last_accessed_at AS last_accessed_at,
-					r.strength AS strength`,
-				escapeCypher(id),
-			)
-			rows, err := e.store.QueryRows(query)
-			if err != nil {
-				continue
-			}
-			for _, row := range rows {
-				eng := rowToEngram(row)
-				if _, exists := seen[eng.ID]; !exists {
-					seen[eng.ID] = &SearchResult{
-						Engram:    eng,
-						MatchType: "association",
-						HopDepth:  hop,
-					}
+		// Batch all candidate IDs into a single query per hop
+		idList := make([]any, len(currentIDs))
+		for i, id := range currentIDs {
+			idList[i] = id
+		}
+		rows, err := e.store.PreparedQueryRows(
+			`MATCH (e1:Engram)-[r:AssociatedWith]->(e2:Engram)
+			WHERE e1.id IN $ids AND r.strength > 0.5
+			RETURN e2.id AS id, e2.content AS content, e2.summary AS summary,
+				e2.memory_type AS memory_type, e2.importance AS importance,
+				e2.access_count AS access_count, e2.decay_factor AS decay_factor,
+				e2.embedding AS embedding, e2.source AS source, e2.tags AS tags,
+				e2.created_at AS created_at, e2.last_accessed_at AS last_accessed_at,
+				r.strength AS strength`,
+			map[string]any{"ids": idList},
+		)
+		if err != nil {
+			continue
+		}
+		for _, row := range rows {
+			eng := rowToEngram(row)
+			if _, exists := seen[eng.ID]; !exists {
+				seen[eng.ID] = &SearchResult{
+					Engram:    eng,
+					MatchType: "association",
+					HopDepth:  hop,
 				}
 			}
 		}
@@ -249,15 +253,13 @@ func (e *Engine) scoreResults(seen map[string]*SearchResult, queryEmbedding []fl
 }
 
 func (e *Engine) strengthenAccess(engramID string) {
-	query := fmt.Sprintf(`
-		MATCH (e:Engram {id: '%s'})
+	e.store.PreparedExecute(
+		`MATCH (e:Engram {id: $eid})
 		SET e.access_count = e.access_count + 1,
-			e.last_accessed_at = timestamp('%s'),
+			e.last_accessed_at = timestamp($ts),
 			e.decay_factor = CASE WHEN e.decay_factor + 0.05 > 1.0 THEN 1.0 ELSE e.decay_factor + 0.05 END`,
-		escapeCypher(engramID),
-		time.Now().Format("2006-01-02 15:04:05"),
+		map[string]any{"eid": engramID, "ts": time.Now().Format("2006-01-02 15:04:05")},
 	)
-	e.store.Execute(query)
 }
 
 func recencyScore(lastAccessed time.Time, now time.Time) float64 {

@@ -363,8 +363,9 @@ func TestRecall_StrengthenAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	if len(results) > 0 {
-		rows, err := engine.store.QueryRows(
-			fmt.Sprintf("MATCH (e:Engram {id: '%s'}) RETURN e.access_count AS cnt", escapeCypher(engram.ID)))
+		rows, err := engine.store.PreparedQueryRows(
+			"MATCH (e:Engram {id: $eid}) RETURN e.access_count AS cnt",
+			map[string]any{"eid": engram.ID})
 		require.NoError(t, err)
 		if len(rows) > 0 {
 			cnt := toInt64(rows[0]["cnt"])
@@ -473,15 +474,16 @@ func TestConsolidate_AppliesDecay(t *testing.T) {
 
 	// Manually set last_accessed_at to 7 days ago to trigger decay
 	weekAgo := time.Now().Add(-7 * 24 * time.Hour)
-	engine.store.Execute(fmt.Sprintf(
-		"MATCH (e:Engram {id: '%s'}) SET e.last_accessed_at = timestamp('%s')",
-		escapeCypher(engram.ID), weekAgo.Format("2006-01-02 15:04:05")))
+	engine.store.PreparedExecute(
+		"MATCH (e:Engram {id: $eid}) SET e.last_accessed_at = timestamp($ts)",
+		map[string]any{"eid": engram.ID, "ts": weekAgo.Format("2006-01-02 15:04:05")})
 
 	err = engine.Consolidate(ctx)
 	require.NoError(t, err)
 
-	rows, err := engine.store.QueryRows(
-		fmt.Sprintf("MATCH (e:Engram {id: '%s'}) RETURN e.decay_factor AS df", escapeCypher(engram.ID)))
+	rows, err := engine.store.PreparedQueryRows(
+		"MATCH (e:Engram {id: $eid}) RETURN e.decay_factor AS df",
+		map[string]any{"eid": engram.ID})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 
@@ -499,15 +501,16 @@ func TestConsolidate_PrunesWeak(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	engine.store.Execute(fmt.Sprintf(
-		"MATCH (e:Engram {id: '%s'}) SET e.decay_factor = 0.01, e.importance = 0.1",
-		escapeCypher(engram.ID)))
+	engine.store.PreparedExecute(
+		"MATCH (e:Engram {id: $eid}) SET e.decay_factor = 0.01, e.importance = 0.1",
+		map[string]any{"eid": engram.ID})
 
 	err = engine.Consolidate(ctx)
 	require.NoError(t, err)
 
-	rows, err := engine.store.QueryRows(
-		fmt.Sprintf("MATCH (e:Engram {id: '%s'}) RETURN e.id", escapeCypher(engram.ID)))
+	rows, err := engine.store.PreparedQueryRows(
+		"MATCH (e:Engram {id: $eid}) RETURN e.id",
+		map[string]any{"eid": engram.ID})
 	require.NoError(t, err)
 	assert.Len(t, rows, 0, "weak engram should be pruned")
 }
@@ -522,15 +525,16 @@ func TestConsolidate_KeepsImportant(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	engine.store.Execute(fmt.Sprintf(
-		"MATCH (e:Engram {id: '%s'}) SET e.decay_factor = 0.01",
-		escapeCypher(engram.ID)))
+	engine.store.PreparedExecute(
+		"MATCH (e:Engram {id: $eid}) SET e.decay_factor = 0.01",
+		map[string]any{"eid": engram.ID})
 
 	err = engine.Consolidate(ctx)
 	require.NoError(t, err)
 
-	rows, err := engine.store.QueryRows(
-		fmt.Sprintf("MATCH (e:Engram {id: '%s'}) RETURN e.id", escapeCypher(engram.ID)))
+	rows, err := engine.store.PreparedQueryRows(
+		"MATCH (e:Engram {id: $eid}) RETURN e.id",
+		map[string]any{"eid": engram.ID})
 	require.NoError(t, err)
 	assert.Len(t, rows, 1, "important engram should survive pruning")
 }
@@ -599,12 +603,6 @@ func TestCosineSimilarity(t *testing.T) {
 func TestFloat32SliceToString(t *testing.T) {
 	assert.Equal(t, "[0.1,0.2,0.3]", float32SliceToString([]float32{0.1, 0.2, 0.3}))
 	assert.Equal(t, "[]", float32SliceToString([]float32{}))
-}
-
-func TestEscapeCypher(t *testing.T) {
-	assert.Equal(t, "hello", escapeCypher("hello"))
-	assert.Equal(t, "it\\'s", escapeCypher("it's"))
-	assert.Equal(t, "back\\\\slash", escapeCypher("back\\slash"))
 }
 
 func TestRecencyScore(t *testing.T) {

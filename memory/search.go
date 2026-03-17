@@ -149,17 +149,16 @@ func (e *Engine) vectorSearchFallbackDirect(queryEmbedding []float32, limit int)
 }
 
 func (e *Engine) ftsSearch(query string, limit int) ([]SearchResult, error) {
-	q := fmt.Sprintf(`
-		CALL query_fts_index('Engram', 'engram_fts_idx', '%s', top_k := %d)
+	rows, err := e.store.PreparedQueryRows(
+		fmt.Sprintf(`CALL query_fts_index('Engram', 'engram_fts_idx', $q, top_k := %d)
 		RETURN node.id AS id, node.content AS content, node.summary AS summary,
 			node.memory_type AS memory_type, node.importance AS importance,
 			node.access_count AS access_count, node.decay_factor AS decay_factor,
 			node.embedding AS embedding, node.source AS source, node.tags AS tags,
 			node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-			score`,
-		escapeCypher(query), limit)
-
-	rows, err := e.store.QueryRows(q)
+			score`, limit),
+		map[string]any{"q": query},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("fts search: %w", err)
 	}
@@ -220,25 +219,16 @@ func (e *Engine) Forget(engramID string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	deleteEdges := fmt.Sprintf(`
-		MATCH (e:Engram {id: '%s'})-[r:EncodedBy]->()
-		DELETE r`, escapeCypher(engramID))
-	e.store.Execute(deleteEdges)
-
-	deleteAssocFrom := fmt.Sprintf(`
-		MATCH (e:Engram {id: '%s'})-[r:AssociatedWith]->()
-		DELETE r`, escapeCypher(engramID))
-	e.store.Execute(deleteAssocFrom)
-
-	deleteAssocTo := fmt.Sprintf(`
-		MATCH ()-[r:AssociatedWith]->(e:Engram {id: '%s'})
-		DELETE r`, escapeCypher(engramID))
-	e.store.Execute(deleteAssocTo)
-
-	deleteNode := fmt.Sprintf(`
-		MATCH (e:Engram {id: '%s'})
-		DELETE e`, escapeCypher(engramID))
-	if err := e.store.Execute(deleteNode); err != nil {
+	params := map[string]any{"eid": engramID}
+	e.store.PreparedExecute(
+		`MATCH (e:Engram {id: $eid})-[r:EncodedBy]->() DELETE r`, params)
+	e.store.PreparedExecute(
+		`MATCH (e:Engram {id: $eid})-[r:AssociatedWith]->() DELETE r`, params)
+	e.store.PreparedExecute(
+		`MATCH ()-[r:AssociatedWith]->(e:Engram {id: $eid}) DELETE r`, params)
+	if err := e.store.PreparedExecute(
+		`MATCH (e:Engram {id: $eid}) DELETE e`, params,
+	); err != nil {
 		return fmt.Errorf("delete engram %s: %w", engramID, err)
 	}
 

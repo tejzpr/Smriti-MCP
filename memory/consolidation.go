@@ -74,11 +74,11 @@ func (e *Engine) applyDecay() error {
 			continue
 		}
 
-		updateQuery := fmt.Sprintf(`
-			MATCH (e:Engram {id: '%s'})
-			SET e.decay_factor = %f`,
-			escapeCypher(id), newDecay)
-		if err := e.store.Execute(updateQuery); err != nil {
+		if err := e.store.PreparedExecute(
+			`MATCH (e:Engram {id: $eid})
+			SET e.decay_factor = $decay`,
+			map[string]any{"eid": id, "decay": newDecay},
+		); err != nil {
 			return fmt.Errorf("update decay for %s: %w", id, err)
 		}
 	}
@@ -111,25 +111,15 @@ func (e *Engine) pruneWeak() error {
 			continue
 		}
 
-		deleteEdges := fmt.Sprintf(`
-			MATCH (e:Engram {id: '%s'})-[r:EncodedBy]->()
-			DELETE r`, escapeCypher(id))
-		e.store.Execute(deleteEdges)
-
-		deleteAssocFrom := fmt.Sprintf(`
-			MATCH (e:Engram {id: '%s'})-[r:AssociatedWith]->()
-			DELETE r`, escapeCypher(id))
-		e.store.Execute(deleteAssocFrom)
-
-		deleteAssocTo := fmt.Sprintf(`
-			MATCH ()-[r:AssociatedWith]->(e:Engram {id: '%s'})
-			DELETE r`, escapeCypher(id))
-		e.store.Execute(deleteAssocTo)
-
-		deleteNode := fmt.Sprintf(`
-			MATCH (e:Engram {id: '%s'})
-			DELETE e`, escapeCypher(id))
-		e.store.Execute(deleteNode)
+		params := map[string]any{"eid": id}
+		e.store.PreparedExecute(
+			`MATCH (e:Engram {id: $eid})-[r:EncodedBy]->() DELETE r`, params)
+		e.store.PreparedExecute(
+			`MATCH (e:Engram {id: $eid})-[r:AssociatedWith]->() DELETE r`, params)
+		e.store.PreparedExecute(
+			`MATCH ()-[r:AssociatedWith]->(e:Engram {id: $eid}) DELETE r`, params)
+		e.store.PreparedExecute(
+			`MATCH (e:Engram {id: $eid}) DELETE e`, params)
 	}
 	return nil
 }
@@ -154,11 +144,10 @@ func (e *Engine) strengthenFrequent() error {
 		boost := math.Min(float64(accessCount)*0.01, 0.1)
 		newDecay := math.Min(currentDecay+boost, 1.0)
 
-		updateQuery := fmt.Sprintf(`
-			MATCH (e:Engram {id: '%s'})
-			SET e.decay_factor = %f`,
-			escapeCypher(id), newDecay)
-		e.store.Execute(updateQuery)
+		e.store.PreparedExecute(
+			`MATCH (e:Engram {id: $eid})
+			SET e.decay_factor = $decay`,
+			map[string]any{"eid": id, "decay": newDecay})
 	}
 	return nil
 }

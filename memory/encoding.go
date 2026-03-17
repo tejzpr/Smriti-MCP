@@ -58,32 +58,30 @@ func (e *Engine) Encode(ctx context.Context, req StoreRequest) (*Engram, error) 
 
 	embeddingStr := float32SliceToString(embedding)
 	createQuery := fmt.Sprintf(`CREATE (e:Engram {
-		id: '%s',
-		content: '%s',
-		summary: '%s',
-		memory_type: '%s',
-		importance: %f,
+		id: $id,
+		content: $content,
+		summary: $summary,
+		memory_type: $memtype,
+		importance: $importance,
 		access_count: 0,
-		created_at: timestamp('%s'),
-		last_accessed_at: timestamp('%s'),
+		created_at: timestamp($ts),
+		last_accessed_at: timestamp($ts),
 		decay_factor: 1.0,
 		embedding: %s,
-		source: '%s',
-		tags: '%s'
-	})`,
-		escapeCypher(engramID),
-		escapeCypher(req.Content),
-		escapeCypher(extraction.Summary),
-		escapeCypher(extraction.MemoryType),
-		importance,
-		now.Format("2006-01-02 15:04:05"),
-		now.Format("2006-01-02 15:04:05"),
-		embeddingStr,
-		escapeCypher(req.Source),
-		escapeCypher(tags),
-	)
+		source: $source,
+		tags: $tags
+	})`, embeddingStr)
 
-	if err := e.store.Execute(createQuery); err != nil {
+	if err := e.store.PreparedExecute(createQuery, map[string]any{
+		"id":         engramID,
+		"content":    req.Content,
+		"summary":    extraction.Summary,
+		"memtype":    extraction.MemoryType,
+		"importance": importance,
+		"ts":         now.Format("2006-01-02 15:04:05"),
+		"source":     req.Source,
+		"tags":       tags,
+	}); err != nil {
 		return nil, fmt.Errorf("create engram: %w", err)
 	}
 
@@ -104,8 +102,10 @@ func (e *Engine) createOrGetCue(ctx context.Context, name, cueType, engramID str
 	cueID := fmt.Sprintf("cue-%s-%s", cueType, name)
 	cueID = strings.ReplaceAll(cueID, " ", "-")
 
-	checkQuery := fmt.Sprintf("MATCH (c:Cue {id: '%s'}) RETURN c.id", escapeCypher(cueID))
-	rows, err := e.store.QueryRows(checkQuery)
+	rows, err := e.store.PreparedQueryRows(
+		"MATCH (c:Cue {id: $cueID}) RETURN c.id",
+		map[string]any{"cueID": cueID},
+	)
 	if err != nil {
 		return fmt.Errorf("check cue existence: %w", err)
 	}
@@ -118,29 +118,26 @@ func (e *Engine) createOrGetCue(ctx context.Context, name, cueType, engramID str
 		embStr := float32SliceToString(cueEmbedding)
 
 		createCue := fmt.Sprintf(`CREATE (c:Cue {
-			id: '%s',
-			name: '%s',
-			cue_type: '%s',
+			id: $cueID,
+			name: $name,
+			cue_type: $cueType,
 			embedding: %s
-		})`,
-			escapeCypher(cueID),
-			escapeCypher(name),
-			escapeCypher(cueType),
-			embStr,
-		)
-		if err := e.store.Execute(createCue); err != nil {
+		})`, embStr)
+		if err := e.store.PreparedExecute(createCue, map[string]any{
+			"cueID":   cueID,
+			"name":    name,
+			"cueType": cueType,
+		}); err != nil {
 			return fmt.Errorf("create cue node: %w", err)
 		}
 	}
 
-	linkQuery := fmt.Sprintf(`
-		MATCH (e:Engram {id: '%s'}), (c:Cue {id: '%s'})
-		CREATE (e)-[:EncodedBy {strength: 1.0, created_at: timestamp('%s')}]->(c)`,
-		escapeCypher(engramID),
-		escapeCypher(cueID),
-		now.Format("2006-01-02 15:04:05"),
-	)
-	if err := e.store.Execute(linkQuery); err != nil {
+	tsStr := now.Format("2006-01-02 15:04:05")
+	if err := e.store.PreparedExecute(
+		`MATCH (e:Engram {id: $eid}), (c:Cue {id: $cid})
+		CREATE (e)-[:EncodedBy {strength: 1.0, created_at: timestamp($ts)}]->(c)`,
+		map[string]any{"eid": engramID, "cid": cueID, "ts": tsStr},
+	); err != nil {
 		return fmt.Errorf("link engram to cue: %w", err)
 	}
 
@@ -148,8 +145,9 @@ func (e *Engine) createOrGetCue(ctx context.Context, name, cueType, engramID str
 }
 
 func (e *Engine) autoAssociate(ctx context.Context, engramID string, embedding []float32) error {
-	rows, err := e.store.QueryRows(
-		fmt.Sprintf("MATCH (e:Engram) WHERE e.id <> '%s' RETURN e.id AS id, e.embedding AS emb", escapeCypher(engramID)),
+	rows, err := e.store.PreparedQueryRows(
+		"MATCH (e:Engram) WHERE e.id <> $eid RETURN e.id AS id, e.embedding AS emb",
+		map[string]any{"eid": engramID},
 	)
 	if err != nil {
 		return fmt.Errorf("query existing engrams: %w", err)
@@ -168,26 +166,21 @@ func (e *Engine) autoAssociate(ctx context.Context, engramID string, embedding [
 		sim := cosineSimilarity(embedding, otherEmb)
 		if sim > 0.7 {
 			now := time.Now()
-			assocQuery := fmt.Sprintf(`
-				MATCH (e1:Engram {id: '%s'}), (e2:Engram {id: '%s'})
-				CREATE (e1)-[:AssociatedWith {relation_type: 'semantic', strength: %f, created_at: timestamp('%s')}]->(e2)`,
-				escapeCypher(engramID),
-				escapeCypher(otherID),
-				sim,
-				now.Format("2006-01-02 15:04:05"),
-			)
-			if err := e.store.Execute(assocQuery); err != nil {
+			if err := e.store.PreparedExecute(
+				`MATCH (e1:Engram {id: $eid1}), (e2:Engram {id: $eid2})
+				CREATE (e1)-[:AssociatedWith {relation_type: 'semantic', strength: $str, created_at: timestamp($ts)}]->(e2)`,
+				map[string]any{
+					"eid1": engramID,
+					"eid2": otherID,
+					"str":  sim,
+					"ts":   now.Format("2006-01-02 15:04:05"),
+				},
+			); err != nil {
 				return fmt.Errorf("create association: %w", err)
 			}
 		}
 	}
 	return nil
-}
-
-func escapeCypher(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "'", "\\'")
-	return s
 }
 
 func float32SliceToString(v []float32) string {

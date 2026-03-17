@@ -125,6 +125,51 @@ func (s *Store) QueryRows(query string) ([]map[string]any, error) {
 	return rows, nil
 }
 
+func (s *Store) PreparedExecute(query string, params map[string]any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stmt, err := s.conn.Prepare(query)
+	if err != nil {
+		return fmt.Errorf("prepare query: %w", err)
+	}
+	defer stmt.Close()
+	result, err := s.conn.Execute(stmt, params)
+	if err != nil {
+		return fmt.Errorf("execute prepared query: %w", err)
+	}
+	defer result.Close()
+	return nil
+}
+
+func (s *Store) PreparedQueryRows(query string, params map[string]any) ([]map[string]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stmt, err := s.conn.Prepare(query)
+	if err != nil {
+		return nil, fmt.Errorf("prepare query: %w", err)
+	}
+	defer stmt.Close()
+	result, err := s.conn.Execute(stmt, params)
+	if err != nil {
+		return nil, fmt.Errorf("execute prepared query: %w", err)
+	}
+	defer result.Close()
+
+	var rows []map[string]any
+	for result.HasNext() {
+		row, err := result.Next()
+		if err != nil {
+			return nil, fmt.Errorf("iterate rows: %w", err)
+		}
+		rowMap, err := row.GetAsMap()
+		if err != nil {
+			return nil, fmt.Errorf("convert row to map: %w", err)
+		}
+		rows = append(rows, rowMap)
+	}
+	return rows, nil
+}
+
 func (s *Store) QuerySingleValue(query string) (any, error) {
 	result, err := s.Query(query)
 	if err != nil {
