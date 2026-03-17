@@ -232,11 +232,11 @@ Download pre-built binaries from the [Releases](https://github.com/tejzpr/smriti
 
 | Platform | Architecture | CGO |
 |----------|-------------|-----|
-| Linux | amd64, arm64 | Enabled (static musl) |
-| macOS | amd64 (Intel), arm64 (Apple Silicon) | Enabled (via Zig) |
-| Windows | amd64 | Enabled (via Zig) |
+| Linux | amd64 | Enabled (native) |
+| macOS | amd64 (Intel), arm64 (Apple Silicon) | Enabled (native) |
+| Windows | amd64 | Enabled (native) |
 
-Each binary includes a `.sha256` checksum for verification.
+Each release includes a `checksums-sha256.txt` for verification.
 
 ## Environment Variables
 
