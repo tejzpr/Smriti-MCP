@@ -9,29 +9,33 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.os }}/${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          - os: linux
-            arch: amd64
+          - goos: linux
+            goarch: amd64
             zig_target: x86_64-linux-musl
-          - os: linux
-            arch: arm64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
             zig_target: aarch64-linux-musl
-          - os: darwin
-            arch: amd64
+            suffix: linux-arm64
+          - goos: darwin
+            goarch: amd64
             zig_target: x86_64-macos
-          - os: darwin
-            arch: arm64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
             zig_target: aarch64-macos
-          - os: windows
-            arch: amd64
+            suffix: darwin-arm64
+          - goos: windows
+            goarch: amd64
             zig_target: x86_64-windows-gnu
+            suffix: windows-amd64.exe
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Go
@@ -46,30 +50,39 @@ jobs:
 
       - name: Build binary
         env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: 1
-          CC: zig cc -target ${{ matrix.zig_target }}
-          CXX: zig c++ -target ${{ matrix.zig_target }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "1"
+          CC: "zig cc -target ${{ matrix.zig_target }}"
+          CXX: "zig c++ -target ${{ matrix.zig_target }}"
         run: |
-          EXT=""
-          if [ "${{ matrix.os }}" = "windows" ]; then
-            EXT=".exe"
-          fi
-          OUTPUT="smriti-mcp-${{ matrix.os }}-${{ matrix.arch }}${EXT}"
-          go build -trimpath -ldflags="-s -w -extldflags '-static'" -o "${OUTPUT}" .
-          chmod +x "${OUTPUT}" 2>/dev/null || true
+          BINARY_NAME="smriti-mcp-${{ matrix.suffix }}"
+          go build -trimpath -ldflags='-s -w' -o "${BINARY_NAME}" .
+          echo "BINARY_NAME=${BINARY_NAME}" >> $GITHUB_ENV
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.BINARY_NAME }}
+
+  checksums:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download all release assets
+        uses: robinraju/release-downloader@v1
+        with:
+          tag: ${{ github.event.release.tag_name }}
+          fileName: "smriti-mcp-*"
+          out-file-path: assets
 
       - name: Generate checksums
         run: |
-          FILE="smriti-mcp-${{ matrix.os }}-${{ matrix.arch }}"
-          if [ "${{ matrix.os }}" = "windows" ]; then
-            FILE="${FILE}.exe"
-          fi
-          sha256sum "${FILE}" > "${FILE}.sha256"
+          cd assets
+          sha256sum smriti-mcp-* > checksums-sha256.txt
+          cat checksums-sha256.txt
 
-      - name: Upload release assets
+      - name: Upload checksums
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            smriti-mcp-${{ matrix.os }}-${{ matrix.arch }}*
+          files: assets/checksums-sha256.txt
