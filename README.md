@@ -8,7 +8,7 @@
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go" alt="Go Version"></a>
   <a href="https://opensource.org/licenses/MPL-2.0"><img src="https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg" alt="License: MPL 2.0"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-Compatible-blue" alt="MCP"></a>
-  <a href="https://github.com/tejzpr/smriti-mcp/pkgs/container/smriti-mcp"><img src="https://img.shields.io/badge/GHCR-Container-blue?logo=docker" alt="GHCR"></a>
+  <a href="https://hub.docker.com/r/tejzpr/smriti-mcp"><img src="https://img.shields.io/badge/Docker%20Hub-Container-blue?logo=docker" alt="Docker Hub"></a>
   <a href="https://github.com/tejzpr/smriti-mcp/actions"><img src="https://github.com/tejzpr/smriti-mcp/actions/workflows/codeql-analysis.yml/badge.svg" alt="CodeQL"></a>
 </p>
 
@@ -185,7 +185,7 @@ Run directly without installing - similar to `npx` for Node.js:
         "-v", "/Users/yourname/.smriti:/home/smriti/.smriti",
         "-e", "LLM_API_KEY=your-api-key",
         "-e", "EMBEDDING_API_KEY=your-embedding-key",
-        "ghcr.io/tejzpr/smriti-mcp"
+        "tejzpr/smriti-mcp"
       ]
     }
   }
@@ -205,7 +205,7 @@ Run directly without installing - similar to `npx` for Node.js:
         "-e", "LLM_API_KEY=your-api-key",
         "-e", "EMBEDDING_API_KEY=your-embedding-key",
         "-e", "ACCESSING_USER=yourname",
-        "ghcr.io/tejzpr/smriti-mcp"
+        "tejzpr/smriti-mcp"
       ]
     }
   }
@@ -224,7 +224,7 @@ Run directly without installing - similar to `npx` for Node.js:
 docker build -t smriti-mcp .
 ```
 
-Then use `smriti-mcp` instead of `ghcr.io/tejzpr/smriti-mcp` in your config.
+Then use `smriti-mcp` instead of `tejzpr/smriti-mcp` in your config.
 
 #### Option 4: GitHub Release Binary
 
