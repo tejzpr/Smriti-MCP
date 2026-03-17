@@ -1,16 +1,23 @@
 # Stage 1: Build
 FROM golang:1.26-alpine AS builder
 
-RUN apk add --no-cache gcc musl-dev bash curl
+RUN apk add --no-cache gcc g++ musl-dev bash curl tar
 
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Download LadybugDB native library for the build platform
-RUN LBUG_DIR=$(go mod download -json github.com/LadybugDB/go-ladybug@v0.13.1 | grep '"Dir"' | cut -d'"' -f4) && \
+# Download LadybugDB native library and place where CGO expects it
+RUN set -e && \
+    LBUG_DIR=$(go mod download -json github.com/LadybugDB/go-ladybug@v0.13.1 | grep '"Dir"' | cut -d'"' -f4) && \
     chmod -R u+w "$LBUG_DIR" && \
-    cd "$LBUG_DIR" && bash download_lbug.sh
+    ARCH=$(uname -m) && \
+    case "$ARCH" in x86_64) ARCH_LABEL="x86_64" ;; aarch64|arm64) ARCH_LABEL="aarch64" ;; esac && \
+    curl -L -o /tmp/liblbug.tar.gz "https://github.com/LadybugDB/ladybug/releases/latest/download/liblbug-linux-${ARCH_LABEL}.tar.gz" && \
+    mkdir -p "$LBUG_DIR/lib/dynamic/linux-$([ "$ARCH_LABEL" = "x86_64" ] && echo amd64 || echo arm64)" && \
+    tar -xzf /tmp/liblbug.tar.gz -C /tmp && \
+    find /tmp -name 'liblbug*' -exec cp {} "$LBUG_DIR/lib/dynamic/linux-$([ "$ARCH_LABEL" = "x86_64" ] && echo amd64 || echo arm64)/" \; && \
+    ls -la "$LBUG_DIR/lib/dynamic/linux-$([ "$ARCH_LABEL" = "x86_64" ] && echo amd64 || echo arm64)/"
 
 COPY . .
 RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /smriti-mcp .
