@@ -12,20 +12,21 @@
   <a href="https://github.com/tejzpr/smriti-mcp/actions"><img src="https://github.com/tejzpr/smriti-mcp/actions/workflows/codeql-analysis.yml/badge.svg" alt="CodeQL"></a>
 </p>
 
-<p align="center"><strong>Graph-Based AI Memory System with EcphoryRAG Retrieval</strong></p>
+<p align="center"><strong>Graph-Based AI Memory System with EcphoryRAG Retrieval and Leiden Clustering</strong></p>
 
-Smriti is a Model Context Protocol (MCP) server that provides persistent, graph-based memory for LLM applications. Built on [LadybugDB](https://ladybugdb.com) (embedded property graph database), it uses [EcphoryRAG](https://arxiv.org/abs/2510.08958)-inspired multi-stage retrieval - combining cue extraction, graph traversal, vector similarity, and multi-hop association - to deliver human-like memory recall.
+Smriti is a Model Context Protocol (MCP) server that provides persistent, graph-based memory for LLM applications. Built on [LadybugDB](https://ladybugdb.com) (embedded property graph database), it uses [EcphoryRAG](https://arxiv.org/abs/2510.08958)-inspired multi-stage retrieval — combining cue extraction, graph traversal, vector similarity, and multi-hop association — to deliver human-like memory recall. Smriti uses the [Leiden algorithm](https://en.wikipedia.org/wiki/Leiden_algorithm) for automatic community detection, enabling cluster-aware retrieval that scales beyond thousands of memories.
 
 ## Features
 
-- **Graph-Based Memory**: Engrams (memories) linked via Cues and Associations in a property graph
-- **EcphoryRAG Retrieval**: Multi-hop associative recall with cue extraction, vector similarity, and composite scoring
-- **Multi-User Support**: Separate LadybugDB per user - scales to thousands of isolated memory stores
-- **Automatic Consolidation**: Exponential decay, pruning of weak memories, strengthening of frequently accessed ones
-- **Flexible Backup**: GitHub (system git) or S3 (AWS SDK) sync, plus noop for local-only
-- **Lazy HNSW Indexing**: Vector and FTS indexes created on-demand when dataset exceeds threshold
-- **OpenAI-Compatible APIs**: Works with any OpenAI-compatible LLM and embedding provider
-- **3 MCP Tools**: `smriti_store`, `smriti_recall`, `smriti_manage`
+- **Graph-Based Memory** — Engrams (memories) linked via Cues and Associations in a property graph
+- **EcphoryRAG Retrieval** — Multi-hop associative recall with cue extraction, vector similarity, and composite scoring
+- **Leiden Community Detection** — Automatic clustering of related memories using the Leiden algorithm with smart-cached resolution tuning, enabling cluster-aware scoring for efficient retrieval at scale
+- **Multi-User Support** — Separate LadybugDB per user, scales to thousands of isolated memory stores
+- **Automatic Consolidation** — Exponential decay, pruning of weak memories, strengthening of frequently accessed ones, and periodic Leiden re-clustering
+- **Flexible Backup** — GitHub (system git) or S3 (AWS SDK) sync, plus noop for local-only
+- **Lazy HNSW Indexing** — Vector and FTS indexes created on-demand when dataset exceeds threshold
+- **OpenAI-Compatible APIs** — Works with any OpenAI-compatible LLM and embedding provider
+- **3 MCP Tools** — `smriti_store`, `smriti_recall`, `smriti_manage`
 
 ## Architecture
 
@@ -45,8 +46,8 @@ graph TD
 
         subgraph Engine["Memory Engine"]
             Encoding["Encoding<br/>LLM + Embed + Link"]
-            Retrieval["Retrieval<br/>Cue Match + Vector + Multi-hop"]
-            Consolidation["Consolidation<br/>Decay + Prune"]
+            Retrieval["Retrieval<br/>Cue Match + Vector + Multi-hop<br/>+ Cluster-Aware Scoring"]
+            Consolidation["Consolidation<br/>Decay + Prune + Leiden Clustering"]
         end
 
         subgraph DB["LadybugDB (Property Graph)"]
@@ -72,18 +73,51 @@ graph TD
 
 The default `recall` mode performs multi-stage retrieval:
 
-1. **Cue Extraction** - LLM extracts entities and keywords from the query
-2. **Cue-Based Graph Traversal** - Follows `EncodedBy` edges to find engrams linked to matching cues
-3. **Vector Similarity Search** - Cosine similarity against all engram embeddings
-4. **Multi-Hop Expansion** - Follows `AssociatedWith` edges to discover related memories
-5. **Composite Scoring** - Blends vector similarity, cue match strength, recency, and importance
-6. **Access Strengthening** - Recalled engrams get their access count bumped (reinforcement)
+1. **Cue Extraction** — LLM extracts entities and keywords from the query
+2. **Cue-Based Graph Traversal** — Follows `EncodedBy` edges to find engrams linked to matching cues
+3. **Vector Similarity Search** — Cosine similarity against all engram embeddings (HNSW index when available, fallback to brute-force)
+4. **Multi-Hop Expansion** — Follows `AssociatedWith` edges to discover related memories
+5. **Cluster-Aware Composite Scoring** — Blends vector similarity (40%), recency (20%), importance (20%), and decay (20%), with hop-depth penalty and soft-bounded cross-cluster penalty (0.5x for hop results outside the seed cluster)
+6. **Access Strengthening** — Recalled engrams get their access count and decay factor bumped (reinforcement)
+
+### Leiden Clustering
+
+Smriti uses the [Leiden algorithm](https://en.wikipedia.org/wiki/Leiden_algorithm) — an improvement over Louvain that guarantees well-connected communities — to automatically detect clusters of related memories in the graph.
+
+**How it works:**
+- Runs automatically during each consolidation cycle
+- Builds a weighted undirected graph from `AssociatedWith` edges between engrams
+- Auto-tunes the resolution parameter using community profiling on the first run
+- Uses a **smart cache**: the tuned resolution is reused across runs and only re-tuned when the graph grows by more than 10%
+- Assigns a `cluster_id` to each engram, stored persistently in the database
+- New engrams inherit the `cluster_id` of their strongest neighbor at encode time
+
+**How it improves retrieval:**
+- The recall pipeline determines a **seed cluster** (most common cluster among direct-match results)
+- Multi-hop results that cross into a different cluster receive a **0.5x score penalty** (soft-bounded: they are penalized, not dropped)
+- This keeps retrieval focused within the most relevant topic cluster while still allowing cross-topic discovery
+
+**Performance characteristics:**
+- Gracefully skips on small graphs (< 3 nodes or 0 edges)
+- Clustering 60 nodes: ~40ms (first run with auto-tune), ~14ms (cached resolution)
+- Per-user: each Engine instance maintains its own independent cache
+
+### Consolidation Pipeline
+
+Consolidation runs periodically (default: every 3600 seconds) and performs:
+
+1. **Exponential Decay** — Reduces `decay_factor` based on time since last access
+2. **Weak Memory Pruning** — Removes engrams below minimum decay threshold
+3. **Frequency Strengthening** — Boosts decay factor for frequently accessed memories
+4. **Orphaned Cue Cleanup** — Removes cues no longer linked to any engram
+5. **Leiden Clustering** — Re-clusters the memory graph (smart-cached, skips if graph hasn't changed significantly)
+6. **Index Management** — Creates HNSW vector and FTS indexes when engram count exceeds threshold (50)
 
 ## Requirements
 
-- **Go 1.25+** - For building from source
-- **Git 2.x+** - Required for GitHub backup provider (must be in PATH)
-- **GCC/Build Tools** - Required for CGO (LadybugDB)
+- **Go 1.25+** — For building from source
+- **Git 2.x+** — Required for GitHub backup provider (must be in PATH)
+- **GCC/Build Tools** — Required for CGO (LadybugDB)
   - macOS: `xcode-select --install`
   - Linux: `sudo apt install build-essential`
   - Windows: Use Docker (recommended) or MinGW
@@ -154,7 +188,7 @@ export ACCESSING_USER=alice
 
 #### Option 2: Go Run
 
-Run directly without installing - similar to `npx` for Node.js:
+Run directly without installing — similar to `npx` for Node.js:
 
 ```json
 {
@@ -214,7 +248,7 @@ Run directly without installing - similar to `npx` for Node.js:
 
 > **Note:**
 > - Replace `/Users/yourname` with your actual home directory path
-> - MCP clients do not expand `$HOME` or `~` in JSON configs - use absolute paths
+> - MCP clients do not expand `$HOME` or `~` in JSON configs — use absolute paths
 > - The `.smriti` volume mount persists your memory database
 > - The container runs as non-root user `smriti`
 
@@ -286,7 +320,7 @@ Each release includes a `checksums-sha256.txt` for verification.
 
 ### smriti_store
 
-**"Remember this"** - Store a new memory. Content is automatically analyzed by the LLM, embedded, and woven into the memory graph.
+**"Remember this"** — Store a new memory. Content is automatically analyzed by the LLM, embedded, and woven into the memory graph. New engrams inherit the `cluster_id` of their most similar existing neighbor.
 
 ```json
 {
@@ -306,7 +340,7 @@ Each release includes a `checksums-sha256.txt` for verification.
 
 ### smriti_recall
 
-**"What do I know about X?"** - Retrieve memories using multi-stage EcphoryRAG retrieval.
+**"What do I know about X?"** — Retrieve memories using multi-stage EcphoryRAG retrieval with cluster-aware scoring.
 
 ```json
 {
@@ -324,13 +358,13 @@ Each release includes a `checksums-sha256.txt` for verification.
 | `memory_type` | string | no | Filter: `episodic`, `semantic`, `procedural` |
 
 **Modes explained:**
-- **`recall`** (default) - Full pipeline: cue extraction → graph traversal → vector search → multi-hop → composite scoring
-- **`search`** - Vector-only cosine similarity. Faster but shallower.
-- **`list`** - No search. Returns recent memories ordered by creation time.
+- **`recall`** (default) — Full pipeline: cue extraction → graph traversal → vector search → multi-hop → cluster-aware composite scoring
+- **`search`** — Vector-only cosine similarity. Faster but shallower.
+- **`list`** — No search. Returns recent memories ordered by last access time.
 
 ### smriti_manage
 
-**"Forget this / sync now"** - Administrative operations.
+**"Forget this / sync now"** — Administrative operations.
 
 ```json
 {
@@ -344,6 +378,25 @@ Each release includes a `checksums-sha256.txt` for verification.
 | `action` | string | yes | `forget` (delete memory) or `sync` (push backup) |
 | `memory_id` | string | if forget | Engram ID to delete |
 
+## Graph Schema
+
+Smriti stores memories in a property graph with the following structure:
+
+```
+Node Tables:
+  Engram   — id, content, summary, memory_type, importance, access_count,
+              created_at, last_accessed_at, decay_factor, embedding, source,
+              tags, cluster_id
+  Cue      — id, name, cue_type, embedding
+
+Relationship Tables:
+  EncodedBy      — (Engram) → (Cue)
+  AssociatedWith — (Engram) → (Engram)  [strength, relation_type, created_at]
+  CoOccurs       — (Cue) → (Cue)       [strength]
+```
+
+The `cluster_id` field on Engram nodes is managed by the Leiden algorithm. A value of `-1` indicates the engram has not yet been assigned to a cluster (e.g., the graph is too small, or the engram has no associations).
+
 ## Storage
 
 Each user gets an isolated LadybugDB file:
@@ -356,10 +409,33 @@ Each user gets an isolated LadybugDB file:
 
 The `STORAGE_LOCATION` env var controls the root. The `ACCESSING_USER` env var selects which user's DB to open. Backup providers sync the user directory to remote storage.
 
+Schema migrations (e.g., adding `cluster_id` to existing databases) run automatically on startup.
+
+## Project Structure
+
+```
+smriti-mcp/
+├── main.go              # Entry point, server setup, signal handling
+├── config/              # Environment variable parsing
+├── llm/                 # OpenAI-compatible HTTP client (LLM + embeddings)
+├── db/                  # LadybugDB Store wrapper, schema, indexes, migrations
+├── memory/
+│   ├── engine.go        # Engine struct, consolidation loop
+│   ├── types.go         # Engram, Cue, Association, SearchResult structs
+│   ├── encoding.go      # Store pipeline: LLM extraction → embed → link → cluster inherit
+│   ├── retrieval.go     # Recall pipeline: cue search → vector → multi-hop → cluster scoring
+│   ├── search.go        # Search modes: list, vector-only, FTS, hybrid
+│   ├── consolidation.go # Decay, prune, strengthen, orphan cleanup
+│   └── leiden.go        # Leiden clustering: graph build, auto-tune, smart cache, batch write
+├── backup/              # Backup providers: noop, github (git), s3 (AWS SDK)
+├── tools/               # MCP tool definitions: store, recall, manage
+└── testutil/            # Shared test helpers
+```
+
 ## Testing
 
 ```bash
-# Run all unit tests
+# Run all tests
 CGO_ENABLED=1 go test ./...
 
 # Verbose with all output
@@ -368,6 +444,9 @@ CGO_ENABLED=1 go test -v ./...
 # Specific package
 CGO_ENABLED=1 go test -v ./memory/...
 CGO_ENABLED=1 go test -v ./tools/...
+
+# Leiden clustering tests only
+CGO_ENABLED=1 go test -v -run "TestRunLeiden|TestNeedsRetune|TestDetermineSeedCluster" ./memory/
 ```
 
 ## Contributing
