@@ -121,6 +121,15 @@ Consolidation runs periodically (default: every 3600 seconds) and performs:
   - macOS: `xcode-select --install`
   - Linux: `sudo apt install build-essential`
   - Windows: Use Docker (recommended) or MinGW
+- **liblbug (LadybugDB shared library)** — Runtime dependency, downloaded automatically by `go-ladybug` during build. If building manually, grab the latest release from [LadybugDB/ladybug](https://github.com/LadybugDB/ladybug/releases):
+
+  | Platform | Asset | Library |
+  |----------|-------|---------|
+  | macOS | `liblbug-osx-universal.tar.gz` | `liblbug.dylib` |
+  | Linux | `liblbug-linux-{arch}.tar.gz` | `liblbug.so` |
+  | Windows | `liblbug-windows-x86_64.zip` | `liblbug.dll` |
+
+  The shared library must be on the system library path at runtime (e.g., `DYLD_LIBRARY_PATH` on macOS, `LD_LIBRARY_PATH` on Linux, or alongside the binary on Windows). Docker and release binaries bundle this automatically.
 
 ## Quick Start
 
