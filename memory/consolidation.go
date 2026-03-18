@@ -40,6 +40,10 @@ func (e *Engine) Consolidate(ctx context.Context) error {
 		return fmt.Errorf("clean orphaned cues: %w", err)
 	}
 
+	if err := e.runLeiden(); err != nil {
+		return fmt.Errorf("leiden clustering: %w", err)
+	}
+
 	db.EnsureIndexes(e.store)
 
 	return nil

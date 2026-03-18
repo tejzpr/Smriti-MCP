@@ -40,7 +40,8 @@ func (e *Engine) listEngrams(limit int) ([]SearchResult, error) {
 			e.memory_type AS memory_type, e.importance AS importance,
 			e.access_count AS access_count, e.decay_factor AS decay_factor,
 			e.embedding AS embedding, e.source AS source, e.tags AS tags,
-			e.created_at AS created_at, e.last_accessed_at AS last_accessed_at
+			e.created_at AS created_at, e.last_accessed_at AS last_accessed_at,
+			e.cluster_id AS cluster_id
 		ORDER BY e.last_accessed_at DESC
 		LIMIT %d`, limit)
 
@@ -82,6 +83,7 @@ func (e *Engine) tryHNSWSearchDirect(queryEmbedding []float32, limit int) []Sear
 			node.access_count AS access_count, node.decay_factor AS decay_factor,
 			node.embedding AS embedding, node.source AS source, node.tags AS tags,
 			node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
+			node.cluster_id AS cluster_id,
 			distance
 		ORDER BY distance`, embStr, limit)
 	rows, err := e.store.QueryRows(q)
@@ -107,7 +109,8 @@ func (e *Engine) vectorSearchFallbackDirect(queryEmbedding []float32, limit int)
 			e.memory_type AS memory_type, e.importance AS importance,
 			e.access_count AS access_count, e.decay_factor AS decay_factor,
 			e.embedding AS embedding, e.source AS source, e.tags AS tags,
-			e.created_at AS created_at, e.last_accessed_at AS last_accessed_at`
+			e.created_at AS created_at, e.last_accessed_at AS last_accessed_at,
+			e.cluster_id AS cluster_id`
 
 	rows, err := e.store.QueryRows(q)
 	if err != nil {
@@ -156,6 +159,7 @@ func (e *Engine) ftsSearch(query string, limit int) ([]SearchResult, error) {
 			node.access_count AS access_count, node.decay_factor AS decay_factor,
 			node.embedding AS embedding, node.source AS source, node.tags AS tags,
 			node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
+			node.cluster_id AS cluster_id,
 			score`, limit),
 		map[string]any{"q": query},
 	)

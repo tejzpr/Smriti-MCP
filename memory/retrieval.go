@@ -87,7 +87,8 @@ func (e *Engine) fanOutCueSearch(entities, keywords []string, seen map[string]*S
 				e.memory_type AS memory_type, e.importance AS importance,
 				e.access_count AS access_count, e.decay_factor AS decay_factor,
 				e.embedding AS embedding, e.source AS source, e.tags AS tags,
-				e.created_at AS created_at, e.last_accessed_at AS last_accessed_at`,
+				e.created_at AS created_at, e.last_accessed_at AS last_accessed_at,
+				e.cluster_id AS cluster_id`,
 			map[string]any{"cueName": cueName},
 		)
 		if err != nil {
@@ -121,6 +122,7 @@ func (e *Engine) tryHNSWSearch(queryEmbedding []float32, limit int, seen map[str
 			node.access_count AS access_count, node.decay_factor AS decay_factor,
 			node.embedding AS embedding, node.source AS source, node.tags AS tags,
 			node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
+			node.cluster_id AS cluster_id,
 			distance
 		ORDER BY distance`, embStr, limit)
 	rows, err := e.store.QueryRows(query)
@@ -147,7 +149,8 @@ func (e *Engine) vectorSearchFallback(queryEmbedding []float32, limit int, seen 
 			e.memory_type AS memory_type, e.importance AS importance,
 			e.access_count AS access_count, e.decay_factor AS decay_factor,
 			e.embedding AS embedding, e.source AS source, e.tags AS tags,
-			e.created_at AS created_at, e.last_accessed_at AS last_accessed_at`
+			e.created_at AS created_at, e.last_accessed_at AS last_accessed_at,
+			e.cluster_id AS cluster_id`
 	rows, err := e.store.QueryRows(query)
 	if err != nil {
 		return nil
@@ -210,6 +213,7 @@ func (e *Engine) multiHopExpand(seen map[string]*SearchResult, maxHops int) erro
 				e2.access_count AS access_count, e2.decay_factor AS decay_factor,
 				e2.embedding AS embedding, e2.source AS source, e2.tags AS tags,
 				e2.created_at AS created_at, e2.last_accessed_at AS last_accessed_at,
+				e2.cluster_id AS cluster_id,
 				r.strength AS strength`,
 			map[string]any{"ids": idList},
 		)
@@ -232,6 +236,10 @@ func (e *Engine) multiHopExpand(seen map[string]*SearchResult, maxHops int) erro
 
 func (e *Engine) scoreResults(seen map[string]*SearchResult, queryEmbedding []float32) {
 	now := time.Now()
+
+	// Determine seed cluster: most common cluster_id among non-hop results
+	seedCluster := determineSeedCluster(seen)
+
 	for _, r := range seen {
 		sim := float64(0)
 		emb := r.Engram.Embedding
@@ -248,8 +256,35 @@ func (e *Engine) scoreResults(seen map[string]*SearchResult, queryEmbedding []fl
 			hopPenalty = 1.0 / float64(1+r.HopDepth)
 		}
 
-		r.Score = (0.4*sim + 0.2*recency + 0.2*importance + 0.2*decay) * hopPenalty
+		// Soft-bounded cluster penalty: cross-cluster hop results get 0.5x
+		clusterPenalty := 1.0
+		if r.HopDepth > 0 && seedCluster >= 0 && r.Engram.ClusterID >= 0 && r.Engram.ClusterID != seedCluster {
+			clusterPenalty = 0.5
+		}
+
+		r.Score = (0.4*sim + 0.2*recency + 0.2*importance + 0.2*decay) * hopPenalty * clusterPenalty
 	}
+}
+
+func determineSeedCluster(seen map[string]*SearchResult) int64 {
+	counts := make(map[int64]int)
+	for _, r := range seen {
+		if r.HopDepth == 0 && r.Engram.ClusterID >= 0 {
+			counts[r.Engram.ClusterID]++
+		}
+	}
+	if len(counts) == 0 {
+		return -1
+	}
+	var bestCluster int64 = -1
+	bestCount := 0
+	for cid, cnt := range counts {
+		if cnt > bestCount {
+			bestCount = cnt
+			bestCluster = cid
+		}
+	}
+	return bestCluster
 }
 
 func (e *Engine) strengthenAccess(engramID string) {
@@ -306,6 +341,9 @@ func rowToEngram(row map[string]any) Engram {
 	}
 	if v, ok := row["last_accessed_at"].(time.Time); ok {
 		eng.LastAccessedAt = v
+	}
+	if v, ok := row["cluster_id"]; ok {
+		eng.ClusterID = toInt64(v)
 	}
 	return eng
 }

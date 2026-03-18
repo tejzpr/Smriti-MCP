@@ -45,6 +45,7 @@ func main() {
 	if err := db.InitSchema(store, cfg.EmbeddingDims); err != nil {
 		log.Fatalf("init schema: %v", err)
 	}
+	db.MigrateSchema(store)
 
 	llmClient := llm.NewClient(llm.ClientConfig{
 		LLMBaseURL:   cfg.LLMBaseURL,

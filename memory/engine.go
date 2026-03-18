@@ -16,11 +16,17 @@ import (
 	"github.com/tejzpr/smriti-mcp/llm"
 )
 
+type leidenState struct {
+	cachedResolution float64
+	cachedNodeCount  int64
+}
+
 type Engine struct {
 	store  *db.Store
 	llm    *llm.Client
 	mu     sync.RWMutex
 	stopCh chan struct{}
+	leiden leidenState
 }
 
 func NewEngine(store *db.Store, llmClient *llm.Client) *Engine {

@@ -69,7 +69,8 @@ func (e *Engine) Encode(ctx context.Context, req StoreRequest) (*Engram, error) 
 		decay_factor: 1.0,
 		embedding: %s,
 		source: $source,
-		tags: $tags
+		tags: $tags,
+		cluster_id: -1
 	})`, embeddingStr)
 
 	if err := e.store.PreparedExecute(createQuery, map[string]any{
@@ -153,6 +154,9 @@ func (e *Engine) autoAssociate(ctx context.Context, engramID string, embedding [
 		return fmt.Errorf("query existing engrams: %w", err)
 	}
 
+	var strongestID string
+	var strongestSim float64
+
 	for _, row := range rows {
 		otherID, ok := row["id"].(string)
 		if !ok {
@@ -177,6 +181,26 @@ func (e *Engine) autoAssociate(ctx context.Context, engramID string, embedding [
 				},
 			); err != nil {
 				return fmt.Errorf("create association: %w", err)
+			}
+			if sim > strongestSim {
+				strongestSim = sim
+				strongestID = otherID
+			}
+		}
+	}
+
+	if strongestID != "" {
+		cRows, err := e.store.PreparedQueryRows(
+			`MATCH (e:Engram {id: $eid}) RETURN e.cluster_id AS cluster_id`,
+			map[string]any{"eid": strongestID},
+		)
+		if err == nil && len(cRows) > 0 {
+			cid := toInt64(cRows[0]["cluster_id"])
+			if cid >= 0 {
+				_ = e.store.PreparedExecute(
+					`MATCH (e:Engram {id: $eid}) SET e.cluster_id = $cid`,
+					map[string]any{"eid": engramID, "cid": cid},
+				)
 			}
 		}
 	}

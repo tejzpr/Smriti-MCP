@@ -21,6 +21,7 @@ type Engram struct {
 	Embedding      []float32 `json:"embedding,omitempty"`
 	Source         string    `json:"source"`
 	Tags           string    `json:"tags"`
+	ClusterID      int64     `json:"cluster_id"`
 }
 
 type Cue struct {

@@ -30,6 +30,27 @@ func InitSchema(store *Store, embeddingDims int) error {
 	return nil
 }
 
+func MigrateSchema(store *Store) {
+	migrations := []string{
+		`ALTER TABLE Engram ADD cluster_id INT64 DEFAULT -1`,
+	}
+	for _, stmt := range migrations {
+		if err := store.Execute(stmt); err != nil {
+			if isAlreadyExistsError(err) || isPropertyError(err) {
+				continue
+			}
+		}
+	}
+}
+
+func isPropertyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "property") || strings.Contains(msg, "column") || strings.Contains(msg, "exist")
+}
+
 func EnsureIndexes(store *Store) {
 	count, err := store.QuerySingleValue("MATCH (e:Engram) RETURN count(e)")
 	if err != nil {
@@ -68,7 +89,8 @@ func schemaStatements(dims int) []string {
 			decay_factor DOUBLE,
 			embedding FLOAT[` + dimStr + `],
 			source STRING,
-			tags STRING
+			tags STRING,
+			cluster_id INT64
 		)`,
 		`CREATE NODE TABLE IF NOT EXISTS Cue(
 			id STRING PRIMARY KEY,

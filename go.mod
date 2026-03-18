@@ -11,6 +11,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/stretchr/testify v1.11.1
+	gonum.org/v1/gonum v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -41,3 +42,5 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace gonum.org/v1/gonum => github.com/tejzpr/gonum v0.0.0-20260228225357-67b620e630be
