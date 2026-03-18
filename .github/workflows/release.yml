@@ -74,19 +74,88 @@ jobs:
           find "$LBUG_DIR/lib" -type f 2>/dev/null || echo "No lib directory found"
         shell: bash
 
-      - name: Build binary
+      - name: Build binary with portable rpath
         env:
           CGO_ENABLED: "1"
         run: |
+          set -e
           BINARY_NAME="smriti-mcp-${{ matrix.suffix }}"
-          go build -trimpath -ldflags='-s -w' -o "${BINARY_NAME}" .
+          OS=$(uname -s)
+
+          case "$OS" in
+            Linux)
+              # Bake $ORIGIN rpath so the binary finds liblbug.so next to itself
+              CGO_LDFLAGS="-Wl,-rpath,\$ORIGIN -Wl,-rpath,/usr/local/lib -Wl,-rpath,/usr/lib" \
+                go build -trimpath -ldflags='-s -w' -o "${BINARY_NAME}" .
+              ;;
+            Darwin)
+              # Bake @executable_path rpath so the binary finds liblbug.dylib next to itself
+              CGO_LDFLAGS="-Wl,-rpath,@executable_path -Wl,-rpath,/usr/local/lib" \
+                go build -trimpath -ldflags='-s -w' -o "${BINARY_NAME}" .
+              # Also patch any leftover runner-specific rpaths
+              install_name_tool -add_rpath @executable_path "${BINARY_NAME}" 2>/dev/null || true
+              install_name_tool -add_rpath /usr/local/lib "${BINARY_NAME}" 2>/dev/null || true
+              ;;
+            MINGW*|CYGWIN*|MSYS*)
+              # Windows searches next to the .exe by default
+              go build -trimpath -ldflags='-s -w' -o "${BINARY_NAME}" .
+              ;;
+          esac
+
           echo "BINARY_NAME=${BINARY_NAME}" >> $GITHUB_ENV
         shell: bash
 
-      - name: Upload release asset
+      - name: Package binary with shared library
+        run: |
+          set -e
+          OS=$(uname -s)
+          LBUG_DIR=$(go mod download -json github.com/LadybugDB/go-ladybug@v0.13.1 | grep '"Dir"' | cut -d'"' -f4)
+          ARCHIVE_NAME=""
+
+          case "$OS" in
+            Linux)
+              ARCH=$(uname -m)
+              case "$ARCH" in x86_64) GOARCH="amd64" ;; aarch64) GOARCH="arm64" ;; esac
+              LIB_DIR="$LBUG_DIR/lib/dynamic/linux-${GOARCH}"
+              mkdir -p staging
+              cp "${{ env.BINARY_NAME }}" staging/
+              find "$LIB_DIR" -name '*.so*' -exec cp {} staging/ \;
+              ARCHIVE_NAME="smriti-mcp-${{ matrix.suffix }}.tar.gz"
+              tar -czf "${ARCHIVE_NAME}" -C staging .
+              ;;
+            Darwin)
+              LIB_DIR="$LBUG_DIR/lib/dynamic/darwin"
+              mkdir -p staging
+              cp "${{ env.BINARY_NAME }}" staging/
+              find "$LIB_DIR" -name '*.dylib' -exec cp {} staging/ \;
+              ARCHIVE_NAME="smriti-mcp-${{ matrix.suffix }}.tar.gz"
+              tar -czf "${ARCHIVE_NAME}" -C staging .
+              ;;
+            MINGW*|CYGWIN*|MSYS*)
+              LIB_DIR="$LBUG_DIR/lib/dynamic/windows"
+              mkdir -p staging
+              cp "${{ env.BINARY_NAME }}" staging/
+              find "$LIB_DIR" -name '*.dll' -exec cp {} staging/ \;
+              ARCHIVE_NAME="smriti-mcp-${{ matrix.suffix }}.zip"
+              cd staging && powershell -Command "Compress-Archive -Path * -DestinationPath ../${ARCHIVE_NAME}" && cd ..
+              ;;
+          esac
+
+          echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
+          echo "=== Archive contents ==="
+          if [[ "$ARCHIVE_NAME" == *.tar.gz ]]; then
+            tar -tzf "${ARCHIVE_NAME}"
+          else
+            echo "(zip archive created)"
+          fi
+        shell: bash
+
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.BINARY_NAME }}
+          files: |
+            ${{ env.BINARY_NAME }}
+            ${{ env.ARCHIVE_NAME }}
 
   checksums:
     runs-on: ubuntu-latest
