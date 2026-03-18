@@ -51,6 +51,41 @@ func isPropertyError(err error) bool {
 	return strings.Contains(msg, "property") || strings.Contains(msg, "column") || strings.Contains(msg, "exist")
 }
 
+// CheckEmbeddingDims verifies that the configured embedding dimensions match
+// the existing database schema. Returns nil if the DB is empty or dims match.
+// Returns an error with a clear message if there's a mismatch.
+func CheckEmbeddingDims(store *Store, expectedDims int) error {
+	rows, err := store.QueryRows(`MATCH (e:Engram) WHERE e.embedding IS NOT NULL RETURN len(e.embedding) AS dims LIMIT 1`)
+	if err != nil {
+		// Table might not exist yet or query not supported — skip check
+		return nil
+	}
+	if len(rows) == 0 {
+		// No engrams yet — nothing to check
+		return nil
+	}
+	actualDims := rows[0]["dims"]
+	var actual int64
+	switch v := actualDims.(type) {
+	case int64:
+		actual = v
+	case int:
+		actual = int64(v)
+	case float64:
+		actual = int64(v)
+	default:
+		return nil
+	}
+	if actual > 0 && actual != int64(expectedDims) {
+		return fmt.Errorf(
+			"embedding dimension mismatch: database has %d-dim embeddings but EMBEDDING_DIMS=%d. "+
+				"Delete the database at the configured path to recreate with the correct dimensions, "+
+				"or set EMBEDDING_DIMS=%d to match the existing database",
+			actual, expectedDims, actual)
+	}
+	return nil
+}
+
 func EnsureIndexes(store *Store) {
 	count, err := store.QuerySingleValue("MATCH (e:Engram) RETURN count(e)")
 	if err != nil {

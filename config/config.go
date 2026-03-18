@@ -43,10 +43,11 @@ type Config struct {
 	LLMModel   string
 
 	// Embedding
-	EmbeddingBaseURL string
-	EmbeddingAPIKey  string
-	EmbeddingModel   string
-	EmbeddingDims    int
+	EmbeddingBaseURL        string
+	EmbeddingAPIKey         string
+	EmbeddingModel          string
+	EmbeddingDims           int
+	EmbeddingDimsAutoDetect bool
 }
 
 func LoadFromEnv() (*Config, error) {
@@ -153,7 +154,8 @@ func LoadFromEnv() (*Config, error) {
 	if cfg.EmbeddingModel == "" {
 		cfg.EmbeddingModel = "text-embedding-3-small"
 	}
-	cfg.EmbeddingDims = 1536
+	cfg.EmbeddingDims = 0
+	cfg.EmbeddingDimsAutoDetect = true
 	if v := os.Getenv("EMBEDDING_DIMS"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -163,6 +165,7 @@ func LoadFromEnv() (*Config, error) {
 			return nil, fmt.Errorf("EMBEDDING_DIMS must be > 0, got %d", n)
 		}
 		cfg.EmbeddingDims = n
+		cfg.EmbeddingDimsAutoDetect = false
 	}
 
 	return cfg, nil

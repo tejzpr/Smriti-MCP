@@ -36,6 +36,24 @@ func main() {
 		log.Fatalf("create db dir: %v", err)
 	}
 
+	// Auto-detect embedding dimensions if not explicitly set
+	if cfg.EmbeddingDimsAutoDetect {
+		log.Println("EMBEDDING_DIMS not set, probing embedding API for dimensions...")
+		probeClient := llm.NewClient(llm.ClientConfig{
+			EmbedBaseURL: cfg.EmbeddingBaseURL,
+			EmbedAPIKey:  cfg.EmbeddingAPIKey,
+			EmbedModel:   cfg.EmbeddingModel,
+		})
+		probeCtx, probeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		dims, probeErr := probeClient.ProbeEmbeddingDims(probeCtx)
+		probeCancel()
+		if probeErr != nil {
+			log.Fatalf("failed to auto-detect embedding dimensions: %v (set EMBEDDING_DIMS env var to skip)", probeErr)
+		}
+		cfg.EmbeddingDims = dims
+		log.Printf("auto-detected embedding dimensions: %d", dims)
+	}
+
 	store, err := db.Open(cfg.DBPath)
 	if err != nil {
 		log.Fatalf("open db: %v", err)
@@ -46,6 +64,10 @@ func main() {
 		log.Fatalf("init schema: %v", err)
 	}
 	db.MigrateSchema(store)
+
+	if err := db.CheckEmbeddingDims(store, cfg.EmbeddingDims); err != nil {
+		log.Fatalf("schema check: %v", err)
+	}
 
 	llmClient := llm.NewClient(llm.ClientConfig{
 		LLMBaseURL:   cfg.LLMBaseURL,

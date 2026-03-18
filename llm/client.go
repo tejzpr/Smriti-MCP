@@ -201,6 +201,65 @@ func (c *Client) EmbedDims() int {
 	return c.embedDims
 }
 
+func (c *Client) SetEmbedDims(dims int) {
+	c.embedDims = dims
+}
+
+// ProbeEmbeddingDims makes a single embedding call with a short test string
+// and returns the actual dimensionality of the returned vector.
+func (c *Client) ProbeEmbeddingDims(ctx context.Context) (int, error) {
+	// Send without dimensions hint so we get the model's native dims
+	reqBody := embedRequest{
+		Model: c.embedModel,
+		Input: "test",
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return 0, fmt.Errorf("marshal probe request: %w", err)
+	}
+
+	url := c.embedBaseURL + "/embeddings"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, fmt.Errorf("create probe request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.embedAPIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.embedAPIKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("probe request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("read probe response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("probe API returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var embedResp embedResponse
+	if err := json.Unmarshal(respBody, &embedResp); err != nil {
+		return 0, fmt.Errorf("unmarshal probe response: %w", err)
+	}
+
+	if embedResp.Error != nil {
+		return 0, fmt.Errorf("probe API error: %s", embedResp.Error.Message)
+	}
+
+	if len(embedResp.Data) == 0 || len(embedResp.Data[0].Embedding) == 0 {
+		return 0, fmt.Errorf("probe API returned no embedding data")
+	}
+
+	return len(embedResp.Data[0].Embedding), nil
+}
+
 func (c *Client) ChatWithJSON(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	messages := []ChatMessage{
 		{Role: "system", Content: systemPrompt},

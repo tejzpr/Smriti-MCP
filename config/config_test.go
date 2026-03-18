@@ -51,7 +51,8 @@ func TestLoadFromEnv_Defaults(t *testing.T) {
 	assert.Equal(t, "https://api.openai.com/v1", cfg.EmbeddingBaseURL)
 	assert.Equal(t, "", cfg.EmbeddingAPIKey)
 	assert.Equal(t, "text-embedding-3-small", cfg.EmbeddingModel)
-	assert.Equal(t, 1536, cfg.EmbeddingDims)
+	assert.Equal(t, 0, cfg.EmbeddingDims)
+	assert.True(t, cfg.EmbeddingDimsAutoDetect)
 }
 
 func TestLoadFromEnv_CustomUser(t *testing.T) {
@@ -199,6 +200,7 @@ func TestLoadFromEnv_CustomEmbeddingConfig(t *testing.T) {
 	assert.Equal(t, "sk-embed-key", cfg.EmbeddingAPIKey)
 	assert.Equal(t, "text-embedding-ada-002", cfg.EmbeddingModel)
 	assert.Equal(t, 768, cfg.EmbeddingDims)
+	assert.False(t, cfg.EmbeddingDimsAutoDetect)
 }
 
 func TestLoadFromEnv_InvalidEmbeddingDims(t *testing.T) {
