@@ -14,14 +14,15 @@
 
 <p align="center"><strong>Graph-Based AI Memory System with EcphoryRAG Retrieval and Leiden Clustering</strong></p>
 
-Smriti is a Model Context Protocol (MCP) server that provides persistent, graph-based memory for LLM applications. Built on [LadybugDB](https://ladybugdb.com) (embedded property graph database), it uses [EcphoryRAG](https://arxiv.org/abs/2510.08958)-inspired multi-stage retrieval — combining cue extraction, graph traversal, vector similarity, and multi-hop association — to deliver human-like memory recall. Smriti uses the [Leiden algorithm](https://en.wikipedia.org/wiki/Leiden_algorithm) for automatic community detection, enabling cluster-aware retrieval that scales beyond thousands of memories.
+Smriti is a Model Context Protocol (MCP) server that provides persistent, graph-based memory for LLM applications. It supports three database backends — [LadybugDB](https://ladybugdb.com) (embedded), [Neo4j](https://neo4j.com), and [FalkorDB](https://www.falkordb.com) — and uses [EcphoryRAG](https://arxiv.org/abs/2510.08958)-inspired multi-stage retrieval — combining cue extraction, graph traversal, vector similarity, and multi-hop association — to deliver human-like memory recall. Smriti uses the [Leiden algorithm](https://en.wikipedia.org/wiki/Leiden_algorithm) for automatic community detection, enabling cluster-aware retrieval that scales beyond thousands of memories.
 
 ## Features
 
 - **Graph-Based Memory** — Engrams (memories) linked via Cues and Associations in a property graph
 - **EcphoryRAG Retrieval** — Multi-hop associative recall with cue extraction, vector similarity, and composite scoring
 - **Leiden Community Detection** — Automatic clustering of related memories using the Leiden algorithm with smart-cached resolution tuning, enabling cluster-aware scoring for efficient retrieval at scale
-- **Multi-User Support** — Separate LadybugDB per user, scales to thousands of isolated memory stores
+- **Multi-Backend Support** — LadybugDB (embedded, zero-config), Neo4j (enterprise graph DB), or FalkorDB (Redis-based graph DB)
+- **Multi-User Isolation** — Per-file (LadybugDB), per-tenant property or per-database (Neo4j), or per-tenant property or per-graph (FalkorDB)
 - **Automatic Consolidation** — Exponential decay, pruning of weak memories, strengthening of frequently accessed ones, and periodic Leiden re-clustering
 - **Flexible Backup** — GitHub (system git) or S3 (AWS SDK) sync, plus noop for local-only
 - **Lazy HNSW Indexing** — Vector and FTS indexes created on-demand when dataset exceeds threshold
@@ -50,8 +51,10 @@ graph TD
             Consolidation["Consolidation<br/>Decay + Prune + Leiden Clustering"]
         end
 
-        subgraph DB["LadybugDB (Property Graph)"]
+        subgraph DB["Graph Database"]
+            direction LR
             Graph["(Engram)──[:EncodedBy]──▶(Cue)<br/>(Engram)──[:AssociatedWith]──▶(Engram)<br/>(Cue)──[:CoOccurs]──▶(Cue)"]
+            DBType["LadybugDB | Neo4j | FalkorDB"]
         end
 
         subgraph Backup["Backup Provider (optional)"]
@@ -117,19 +120,21 @@ Consolidation runs periodically (default: every 3600 seconds) and performs:
 
 - **Go 1.25+** — For building from source
 - **Git 2.x+** — Required for GitHub backup provider (must be in PATH)
-- **GCC/Build Tools** — Required for CGO (LadybugDB)
+- **GCC/Build Tools** — Required for CGO (LadybugDB backend)
   - macOS: `xcode-select --install`
   - Linux: `sudo apt install build-essential`
   - Windows: Use Docker (recommended) or MinGW
-- **liblbug (LadybugDB shared library)** — Runtime dependency, downloaded automatically by `go-ladybug` during build. If building manually, grab the latest release from [LadybugDB/ladybug](https://github.com/LadybugDB/ladybug/releases):
+- **liblbug (LadybugDB shared library)** — Runtime dependency for LadybugDB backend, downloaded automatically by `go-ladybug` during build. If building manually, grab the latest release from [LadybugDB/ladybug](https://github.com/LadybugDB/ladybug/releases):
 
   | Platform | Asset | Library |
   |----------|-------|---------|
-  | macOS | `liblbug-osx-universal.tar.gz` | `liblbug.dylib` |
+  | macOS | `liblbug-osx-arm64.tar.gz` / `liblbug-osx-x86_64.tar.gz` | `liblbug.dylib` |
   | Linux | `liblbug-linux-{arch}.tar.gz` | `liblbug.so` |
   | Windows | `liblbug-windows-x86_64.zip` | `liblbug.dll` |
 
   The shared library must be on the system library path at runtime (e.g., `DYLD_LIBRARY_PATH` on macOS, `LD_LIBRARY_PATH` on Linux, or alongside the binary on Windows). Docker and release binaries bundle this automatically.
+- **Neo4j 5.x+** — Required only when using `DB_TYPE=neo4j`. Must have APOC and GDS plugins for vector search and full-text indexing.
+- **FalkorDB** — Required only when using `DB_TYPE=falkordb`. Runs on Redis protocol (default port 6379).
 
 ## Quick Start
 
@@ -287,8 +292,9 @@ Each release includes a `checksums-sha256.txt` for verification.
 
 | Variable | Default | Description |
 |---|---|---|
-| `ACCESSING_USER` | OS username | User identifier (separate DB per user) |
-| `STORAGE_LOCATION` | `~/.smriti` | Root storage directory |
+| `ACCESSING_USER` | OS username | User identifier (used for DB isolation) |
+| `STORAGE_LOCATION` | `~/.smriti` | Root storage directory (LadybugDB only) |
+| `DB_TYPE` | `ladybug` | Database backend: `ladybug`, `neo4j`, or `falkordb` |
 
 ### LLM
 
@@ -318,6 +324,25 @@ Each release includes a `checksums-sha256.txt` for verification.
 | `S3_REGION` | _(empty)_ | S3 region (required if `s3`) |
 | `S3_ACCESS_KEY` | _(empty)_ | S3 access key (required if `s3`) |
 | `S3_SECRET_KEY` | _(empty)_ | S3 secret key (required if `s3`) |
+
+### Neo4j (when DB_TYPE=neo4j)
+
+| Variable | Default | Description |
+|---|---|---|
+| `NEO4J_URI` | _(required)_ | Bolt URI (e.g. `bolt://localhost:7687`) |
+| `NEO4J_USERNAME` | _(required)_ | Neo4j username |
+| `NEO4J_PASSWORD` | _(required)_ | Neo4j password |
+| `NEO4J_DATABASE` | `neo4j` | Database name (overridden by username in `database` isolation mode) |
+| `NEO4J_ISOLATION` | `tenant` | `tenant` (property-based, Community Edition) or `database` (per-DB, Enterprise Edition) |
+
+### FalkorDB (when DB_TYPE=falkordb)
+
+| Variable | Default | Description |
+|---|---|---|
+| `FALKOR_ADDR` | `localhost:6379` | FalkorDB Redis address |
+| `FALKOR_PASSWORD` | _(empty)_ | FalkorDB password (if auth enabled) |
+| `FALKOR_GRAPH` | `smriti` | Graph name (overridden by `{user}_smriti` in `graph` isolation mode) |
+| `FALKOR_ISOLATION` | `tenant` | `tenant` (property-based) or `graph` (per-graph isolation) |
 
 ### Consolidation
 
@@ -406,9 +431,13 @@ Relationship Tables:
 
 The `cluster_id` field on Engram nodes is managed by the Leiden algorithm. A value of `-1` indicates the engram has not yet been assigned to a cluster (e.g., the graph is too small, or the engram has no associations).
 
-## Storage
+## Storage & Isolation
 
-Each user gets an isolated LadybugDB file:
+Smriti supports three database backends with different storage and isolation models:
+
+### LadybugDB (default)
+
+Each user gets an isolated embedded database file:
 
 ```
 ~/.smriti/
@@ -417,6 +446,20 @@ Each user gets an isolated LadybugDB file:
 ```
 
 The `STORAGE_LOCATION` env var controls the root. The `ACCESSING_USER` env var selects which user's DB to open. Backup providers sync the user directory to remote storage.
+
+### Neo4j
+
+Two isolation modes controlled by `NEO4J_ISOLATION`:
+
+- **`tenant`** (default) — All users share one database. Each node gets a `user` property and all queries filter by it. Works on Neo4j Community Edition.
+- **`database`** — Each user gets a separate Neo4j database. Requires Neo4j Enterprise Edition.
+
+### FalkorDB
+
+Two isolation modes controlled by `FALKOR_ISOLATION`:
+
+- **`tenant`** (default) — All users share one graph. Each node gets a `user` property and all queries filter by it.
+- **`graph`** — Each user gets a separate graph (named `{user}_smriti`).
 
 Schema migrations (e.g., adding `cluster_id` to existing databases) run automatically on startup.
 
@@ -427,7 +470,7 @@ smriti-mcp/
 ├── main.go              # Entry point, server setup, signal handling
 ├── config/              # Environment variable parsing
 ├── llm/                 # OpenAI-compatible HTTP client (LLM + embeddings)
-├── db/                  # LadybugDB Store wrapper, schema, indexes, migrations
+├── db/                  # Database backends (LadybugDB, Neo4j, FalkorDB), schema, indexes, migrations
 ├── memory/
 │   ├── engine.go        # Engine struct, consolidation loop
 │   ├── types.go         # Engram, Cue, Association, SearchResult structs
@@ -444,7 +487,7 @@ smriti-mcp/
 ## Testing
 
 ```bash
-# Run all tests
+# Run unit tests
 CGO_ENABLED=1 go test ./...
 
 # Verbose with all output
@@ -457,6 +500,28 @@ CGO_ENABLED=1 go test -v ./tools/...
 # Leiden clustering tests only
 CGO_ENABLED=1 go test -v -run "TestRunLeiden|TestNeedsRetune|TestDetermineSeedCluster" ./memory/
 ```
+
+### E2E / Integration Tests
+
+E2E tests require real LLM/embedding services and are gated behind the `integration` build tag:
+
+```bash
+# LadybugDB E2E (no external DB required)
+CGO_ENABLED=1 go test -tags integration -v -run "TestE2E_LadybugDB" ./memory/
+
+# Neo4j E2E (requires running Neo4j instance)
+NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME="neo4j" NEO4J_PASSWORD="yourpass" \
+  CGO_ENABLED=1 go test -tags integration -v -run "TestE2E_Neo4j" ./memory/
+
+# FalkorDB E2E (requires running FalkorDB instance)
+FALKOR_ADDR="localhost:6379" \
+  CGO_ENABLED=1 go test -tags integration -v -run "TestE2E_FalkorDB" ./memory/
+
+# All E2E tests
+CGO_ENABLED=1 go test -tags integration -v -run "TestE2E_" ./memory/
+```
+
+All E2E tests require `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `EMBEDDING_BASE_URL`, `EMBEDDING_MODEL`, and `EMBEDDING_API_KEY` environment variables.
 
 ## Contributing
 
