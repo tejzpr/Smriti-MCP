@@ -15,14 +15,14 @@ import (
 	lbug "github.com/LadybugDB/go-ladybug"
 )
 
-type Store struct {
+type LadybugStore struct {
 	db   *lbug.Database
 	conn *lbug.Connection
 	path string
 	mu   sync.Mutex
 }
 
-func Open(dbPath string) (*Store, error) {
+func Open(dbPath string) (*LadybugStore, error) {
 	dir := filepath.Dir(dbPath)
 	if dir != ":memory:" && dir != "" {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -42,14 +42,14 @@ func Open(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("open connection: %w", err)
 	}
 
-	return &Store{
+	return &LadybugStore{
 		db:   database,
 		conn: conn,
 		path: dbPath,
 	}, nil
 }
 
-func OpenInMemory() (*Store, error) {
+func OpenInMemory() (*LadybugStore, error) {
 	config := lbug.DefaultSystemConfig()
 	database, err := lbug.OpenInMemoryDatabase(config)
 	if err != nil {
@@ -62,14 +62,14 @@ func OpenInMemory() (*Store, error) {
 		return nil, fmt.Errorf("open connection: %w", err)
 	}
 
-	return &Store{
+	return &LadybugStore{
 		db:   database,
 		conn: conn,
 		path: ":memory:",
 	}, nil
 }
 
-func (s *Store) Close() {
+func (s *LadybugStore) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn != nil {
@@ -82,7 +82,7 @@ func (s *Store) Close() {
 	}
 }
 
-func (s *Store) Execute(query string) error {
+func (s *LadybugStore) Execute(query string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result, err := s.conn.Query(query)
@@ -93,7 +93,7 @@ func (s *Store) Execute(query string) error {
 	return nil
 }
 
-func (s *Store) Query(query string) (*lbug.QueryResult, error) {
+func (s *LadybugStore) Query(query string) (*lbug.QueryResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	result, err := s.conn.Query(query)
@@ -103,7 +103,7 @@ func (s *Store) Query(query string) (*lbug.QueryResult, error) {
 	return result, nil
 }
 
-func (s *Store) QueryRows(query string) ([]map[string]any, error) {
+func (s *LadybugStore) QueryRows(query string) ([]map[string]any, error) {
 	result, err := s.Query(query)
 	if err != nil {
 		return nil, err
@@ -125,7 +125,7 @@ func (s *Store) QueryRows(query string) ([]map[string]any, error) {
 	return rows, nil
 }
 
-func (s *Store) PreparedExecute(query string, params map[string]any) error {
+func (s *LadybugStore) PreparedExecute(query string, params map[string]any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	stmt, err := s.conn.Prepare(query)
@@ -141,7 +141,7 @@ func (s *Store) PreparedExecute(query string, params map[string]any) error {
 	return nil
 }
 
-func (s *Store) PreparedQueryRows(query string, params map[string]any) ([]map[string]any, error) {
+func (s *LadybugStore) PreparedQueryRows(query string, params map[string]any) ([]map[string]any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	stmt, err := s.conn.Prepare(query)
@@ -170,7 +170,7 @@ func (s *Store) PreparedQueryRows(query string, params map[string]any) ([]map[st
 	return rows, nil
 }
 
-func (s *Store) QuerySingleValue(query string) (any, error) {
+func (s *LadybugStore) QuerySingleValue(query string) (any, error) {
 	result, err := s.Query(query)
 	if err != nil {
 		return nil, err
@@ -194,10 +194,18 @@ func (s *Store) QuerySingleValue(query string) (any, error) {
 	return val[0], nil
 }
 
-func (s *Store) Path() string {
+func (s *LadybugStore) Path() string {
 	return s.path
 }
 
-func (s *Store) DB() *lbug.Database {
+func (s *LadybugStore) DBType() string {
+	return "ladybug"
+}
+
+func (s *LadybugStore) TenantUser() string {
+	return ""
+}
+
+func (s *LadybugStore) LadybugDB() *lbug.Database {
 	return s.db
 }

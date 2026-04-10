@@ -13,7 +13,7 @@ import (
 
 const IndexThreshold = 50
 
-func InitSchema(store *Store, embeddingDims int) error {
+func InitSchema(store Store, embeddingDims int) error {
 	statements := schemaStatements(embeddingDims)
 	for _, stmt := range statements {
 		stmt = strings.TrimSpace(stmt)
@@ -27,12 +27,32 @@ func InitSchema(store *Store, embeddingDims int) error {
 			return fmt.Errorf("schema init failed on %q: %w", truncate(stmt, 80), err)
 		}
 	}
+	// Add user column for tenant-property isolation
+	if store.TenantUser() != "" {
+		for _, stmt := range []string{
+			`ALTER TABLE Engram ADD user STRING DEFAULT ''`,
+			`ALTER TABLE Cue ADD user STRING DEFAULT ''`,
+		} {
+			if err := store.Execute(stmt); err != nil {
+				if isAlreadyExistsError(err) || isPropertyError(err) {
+					continue
+				}
+			}
+		}
+	}
 	return nil
 }
 
-func MigrateSchema(store *Store) {
+func MigrateSchema(store Store) {
 	migrations := []string{
 		`ALTER TABLE Engram ADD cluster_id INT64 DEFAULT -1`,
+	}
+	// Add user columns if tenant isolation is active
+	if store.TenantUser() != "" {
+		migrations = append(migrations,
+			`ALTER TABLE Engram ADD user STRING DEFAULT ''`,
+			`ALTER TABLE Cue ADD user STRING DEFAULT ''`,
+		)
 	}
 	for _, stmt := range migrations {
 		if err := store.Execute(stmt); err != nil {
@@ -54,8 +74,12 @@ func isPropertyError(err error) bool {
 // CheckEmbeddingDims verifies that the configured embedding dimensions match
 // the existing database schema. Returns nil if the DB is empty or dims match.
 // Returns an error with a clear message if there's a mismatch.
-func CheckEmbeddingDims(store *Store, expectedDims int) error {
-	rows, err := store.QueryRows(`MATCH (e:Engram) WHERE e.embedding IS NOT NULL RETURN len(e.embedding) AS dims LIMIT 1`)
+func CheckEmbeddingDims(store Store, expectedDims int) error {
+	lenFn := "len"
+	if store.DBType() == "neo4j" {
+		lenFn = "size"
+	}
+	rows, err := store.QueryRows(fmt.Sprintf(`MATCH (e:Engram) WHERE e.embedding IS NOT NULL RETURN %s(e.embedding) AS dims LIMIT 1`, lenFn))
 	if err != nil {
 		// Table might not exist yet or query not supported — skip check
 		return nil
@@ -86,7 +110,7 @@ func CheckEmbeddingDims(store *Store, expectedDims int) error {
 	return nil
 }
 
-func EnsureIndexes(store *Store) {
+func EnsureIndexes(store Store) {
 	count, err := store.QuerySingleValue("MATCH (e:Engram) RETURN count(e)")
 	if err != nil {
 		return

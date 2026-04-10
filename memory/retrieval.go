@@ -82,14 +82,14 @@ func (e *Engine) fanOutCueSearch(entities, keywords []string, seen map[string]*S
 	for _, cueName := range allCues {
 		rows, err := e.store.PreparedQueryRows(
 			`MATCH (e:Engram)-[:EncodedBy]->(c:Cue)
-			WHERE c.name = $cueName
+			WHERE c.name = $cueName`+tenantFilterAnd(e.store, "e")+`
 			RETURN e.id AS id, e.content AS content, e.summary AS summary,
 				e.memory_type AS memory_type, e.importance AS importance,
 				e.access_count AS access_count, e.decay_factor AS decay_factor,
 				e.embedding AS embedding, e.source AS source, e.tags AS tags,
 				e.created_at AS created_at, e.last_accessed_at AS last_accessed_at,
 				e.cluster_id AS cluster_id`,
-			map[string]any{"cueName": cueName},
+			tenantParam(e.store, map[string]any{"cueName": cueName}),
 		)
 		if err != nil {
 			continue
@@ -116,15 +116,7 @@ func (e *Engine) vectorSearch(queryEmbedding []float32, limit int, seen map[stri
 
 func (e *Engine) tryHNSWSearch(queryEmbedding []float32, limit int, seen map[string]*SearchResult) bool {
 	embStr := float32SliceToString(queryEmbedding)
-	query := fmt.Sprintf(`CALL QUERY_VECTOR_INDEX('Engram', 'engram_embedding_idx', %s, %d)
-		RETURN node.id AS id, node.content AS content, node.summary AS summary,
-			node.memory_type AS memory_type, node.importance AS importance,
-			node.access_count AS access_count, node.decay_factor AS decay_factor,
-			node.embedding AS embedding, node.source AS source, node.tags AS tags,
-			node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-			node.cluster_id AS cluster_id,
-			distance
-		ORDER BY distance`, embStr, limit)
+	query := vectorSearchQuery(e.store, "engram_embedding_idx", embStr, limit)
 	rows, err := e.store.QueryRows(query)
 	if err != nil {
 		return false
@@ -144,14 +136,20 @@ func (e *Engine) tryHNSWSearch(queryEmbedding []float32, limit int, seen map[str
 }
 
 func (e *Engine) vectorSearchFallback(queryEmbedding []float32, limit int, seen map[string]*SearchResult) error {
-	query := `MATCH (e:Engram)
+	query := `MATCH (e:Engram)` + tenantFilter(e.store, "e") + `
 		RETURN e.id AS id, e.content AS content, e.summary AS summary,
 			e.memory_type AS memory_type, e.importance AS importance,
 			e.access_count AS access_count, e.decay_factor AS decay_factor,
 			e.embedding AS embedding, e.source AS source, e.tags AS tags,
 			e.created_at AS created_at, e.last_accessed_at AS last_accessed_at,
 			e.cluster_id AS cluster_id`
-	rows, err := e.store.QueryRows(query)
+	var rows []map[string]any
+	var err error
+	if isTenant(e.store) {
+		rows, err = e.store.PreparedQueryRows(query, tenantParam(e.store, nil))
+	} else {
+		rows, err = e.store.QueryRows(query)
+	}
 	if err != nil {
 		return nil
 	}
@@ -207,7 +205,7 @@ func (e *Engine) multiHopExpand(seen map[string]*SearchResult, maxHops int) erro
 		}
 		rows, err := e.store.PreparedQueryRows(
 			`MATCH (e1:Engram)-[r:AssociatedWith]->(e2:Engram)
-			WHERE e1.id IN $ids AND r.strength > 0.5
+			WHERE e1.id IN $ids AND r.strength > 0.5`+tenantFilterAnd(e.store, "e1")+`
 			RETURN e2.id AS id, e2.content AS content, e2.summary AS summary,
 				e2.memory_type AS memory_type, e2.importance AS importance,
 				e2.access_count AS access_count, e2.decay_factor AS decay_factor,
@@ -215,7 +213,7 @@ func (e *Engine) multiHopExpand(seen map[string]*SearchResult, maxHops int) erro
 				e2.created_at AS created_at, e2.last_accessed_at AS last_accessed_at,
 				e2.cluster_id AS cluster_id,
 				r.strength AS strength`,
-			map[string]any{"ids": idList},
+			tenantParam(e.store, map[string]any{"ids": idList}),
 		)
 		if err != nil {
 			continue
@@ -288,12 +286,13 @@ func determineSeedCluster(seen map[string]*SearchResult) int64 {
 }
 
 func (e *Engine) strengthenAccess(engramID string) {
+	tsFn := tsFunc(e.store)
 	e.store.PreparedExecute(
-		`MATCH (e:Engram {id: $eid})
+		fmt.Sprintf(`MATCH (e:Engram {id: $eid})
 		SET e.access_count = e.access_count + 1,
-			e.last_accessed_at = timestamp($ts),
-			e.decay_factor = CASE WHEN e.decay_factor + 0.05 > 1.0 THEN 1.0 ELSE e.decay_factor + 0.05 END`,
-		map[string]any{"eid": engramID, "ts": time.Now().Format("2006-01-02 15:04:05")},
+			e.last_accessed_at = %s($ts),
+			e.decay_factor = CASE WHEN e.decay_factor + 0.05 > 1.0 THEN 1.0 ELSE e.decay_factor + 0.05 END`, tsFn),
+		tenantParam(e.store, map[string]any{"eid": engramID, "ts": time.Now().Format(tsFormat(e.store))}),
 	)
 }
 

@@ -16,17 +16,24 @@ import (
 )
 
 const (
-	leidenMinNodes    = 3
-	leidenRetunePct   = 0.10
-	leidenProfileLow  = 0.1
-	leidenProfileHigh = 10.0
+	leidenMinNodes     = 3
+	leidenRetunePct    = 0.10
+	leidenProfileLow   = 0.1
+	leidenProfileHigh  = 10.0
 	leidenProfileGrain = 1.0
 	leidenEffort       = 5
 )
 
 func (e *Engine) runLeiden() error {
 	// 1. Query all Engram IDs
-	nodeRows, err := e.store.QueryRows(`MATCH (e:Engram) RETURN e.id AS id`)
+	var nodeRows []map[string]any
+	var err error
+	q := `MATCH (e:Engram)` + tenantFilter(e.store, "e") + ` RETURN e.id AS id`
+	if isTenant(e.store) {
+		nodeRows, err = e.store.PreparedQueryRows(q, tenantParam(e.store, nil))
+	} else {
+		nodeRows, err = e.store.QueryRows(q)
+	}
 	if err != nil {
 		return fmt.Errorf("query engram ids: %w", err)
 	}
@@ -48,9 +55,14 @@ func (e *Engine) runLeiden() error {
 	}
 
 	// 2. Query all AssociatedWith edges
-	edgeRows, err := e.store.QueryRows(
-		`MATCH (e1:Engram)-[r:AssociatedWith]->(e2:Engram)
-		RETURN e1.id AS from_id, e2.id AS to_id, r.strength AS strength`)
+	eq := `MATCH (e1:Engram)-[r:AssociatedWith]->(e2:Engram)` + tenantFilter(e.store, "e1") + `
+		RETURN e1.id AS from_id, e2.id AS to_id, r.strength AS strength`
+	var edgeRows []map[string]any
+	if isTenant(e.store) {
+		edgeRows, err = e.store.PreparedQueryRows(eq, tenantParam(e.store, nil))
+	} else {
+		edgeRows, err = e.store.QueryRows(eq)
+	}
 	if err != nil {
 		return fmt.Errorf("query associations: %w", err)
 	}
@@ -125,7 +137,7 @@ func (e *Engine) runLeiden() error {
 	for engramID, clusterID := range clusterMap {
 		if err := e.store.PreparedExecute(
 			`MATCH (e:Engram {id: $eid}) SET e.cluster_id = $cid`,
-			map[string]any{"eid": engramID, "cid": clusterID},
+			tenantParam(e.store, map[string]any{"eid": engramID, "cid": clusterID}),
 		); err != nil {
 			return fmt.Errorf("set cluster_id for %s: %w", engramID, err)
 		}

@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.1
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.45.0
+	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
 	github.com/stretchr/testify v1.11.1
 	gonum.org/v1/gonum v0.0.0-00010101000000-000000000000
 )

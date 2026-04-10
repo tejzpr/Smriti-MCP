@@ -21,6 +21,16 @@ type Config struct {
 	LocalPath string // {STORAGE_LOCATION}/{User}/
 	DBPath    string // {LocalPath}/memory.lbug
 
+	// Database backend
+	DBType string // "ladybug" (default) or "neo4j"
+
+	// Neo4j connection (only when DBType="neo4j")
+	Neo4jURI       string
+	Neo4jUsername  string
+	Neo4jPassword  string
+	Neo4jDatabase  string
+	Neo4jIsolation string // "tenant" (default) or "database"
+
 	// Backup
 	BackupType         string // "none", "github", "s3"
 	BackupSyncInterval int    // seconds, 0 = disabled
@@ -74,6 +84,47 @@ func LoadFromEnv() (*Config, error) {
 	}
 	cfg.LocalPath = filepath.Join(storageLocation, cfg.User)
 	cfg.DBPath = filepath.Join(cfg.LocalPath, "memory.lbug")
+
+	// Database type
+	cfg.DBType = strings.ToLower(os.Getenv("DB_TYPE"))
+	if cfg.DBType == "" {
+		cfg.DBType = "ladybug"
+	}
+	if cfg.DBType != "ladybug" && cfg.DBType != "neo4j" {
+		return nil, fmt.Errorf("invalid DB_TYPE: %q (must be ladybug or neo4j)", cfg.DBType)
+	}
+
+	// Neo4j connection config
+	cfg.Neo4jURI = os.Getenv("NEO4J_URI")
+	cfg.Neo4jUsername = os.Getenv("NEO4J_USERNAME")
+	cfg.Neo4jPassword = os.Getenv("NEO4J_PASSWORD")
+	cfg.Neo4jDatabase = os.Getenv("NEO4J_DATABASE")
+	if cfg.Neo4jDatabase == "" {
+		cfg.Neo4jDatabase = "neo4j"
+	}
+	// Neo4j isolation mode
+	cfg.Neo4jIsolation = strings.ToLower(os.Getenv("NEO4J_ISOLATION"))
+	if cfg.Neo4jIsolation == "" {
+		cfg.Neo4jIsolation = "tenant"
+	}
+	if cfg.Neo4jIsolation != "tenant" && cfg.Neo4jIsolation != "database" {
+		return nil, fmt.Errorf("invalid NEO4J_ISOLATION: %q (must be tenant or database)", cfg.Neo4jIsolation)
+	}
+	if cfg.DBType == "neo4j" {
+		if cfg.Neo4jURI == "" {
+			return nil, fmt.Errorf("NEO4J_URI is required when DB_TYPE=neo4j")
+		}
+		if cfg.Neo4jUsername == "" {
+			return nil, fmt.Errorf("NEO4J_USERNAME is required when DB_TYPE=neo4j")
+		}
+		if cfg.Neo4jPassword == "" {
+			return nil, fmt.Errorf("NEO4J_PASSWORD is required when DB_TYPE=neo4j")
+		}
+		// In database isolation mode, use user name as the database
+		if cfg.Neo4jIsolation == "database" && cfg.Neo4jDatabase == "neo4j" {
+			cfg.Neo4jDatabase = cfg.User
+		}
+	}
 
 	// Backup type
 	cfg.BackupType = strings.ToLower(os.Getenv("BACKUP_TYPE"))

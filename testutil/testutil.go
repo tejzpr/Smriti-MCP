@@ -22,7 +22,7 @@ import (
 
 type TestEnv struct {
 	Engine *memory.Engine
-	Store  *db.Store
+	Store  db.Store
 	Server *httptest.Server
 }
 

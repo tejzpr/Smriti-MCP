@@ -20,7 +20,7 @@ func TestOpenInMemory(t *testing.T) {
 	defer store.Close()
 
 	assert.Equal(t, ":memory:", store.Path())
-	assert.NotNil(t, store.DB())
+	assert.NotNil(t, store.LadybugDB())
 }
 
 func TestOpenAndClose(t *testing.T) {

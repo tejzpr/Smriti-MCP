@@ -32,10 +32,6 @@ func main() {
 		log.Fatalf("config error: %v", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
-		log.Fatalf("create db dir: %v", err)
-	}
-
 	// Auto-detect embedding dimensions if not explicitly set
 	if cfg.EmbeddingDimsAutoDetect {
 		log.Println("EMBEDDING_DIMS not set, probing embedding API for dimensions...")
@@ -54,16 +50,45 @@ func main() {
 		log.Printf("auto-detected embedding dimensions: %d", dims)
 	}
 
-	store, err := db.Open(cfg.DBPath)
-	if err != nil {
-		log.Fatalf("open db: %v", err)
+	var store db.Store
+	switch cfg.DBType {
+	case "neo4j":
+		neo4jStore, err := db.OpenNeo4j(db.Neo4jConfig{
+			URI:       cfg.Neo4jURI,
+			Username:  cfg.Neo4jUsername,
+			Password:  cfg.Neo4jPassword,
+			Database:  cfg.Neo4jDatabase,
+			Isolation: cfg.Neo4jIsolation,
+			User:      cfg.User,
+		})
+		if err != nil {
+			log.Fatalf("open neo4j: %v", err)
+		}
+		store = neo4jStore
+	default:
+		if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
+			log.Fatalf("create db dir: %v", err)
+		}
+		lbugStore, err := db.Open(cfg.DBPath)
+		if err != nil {
+			log.Fatalf("open db: %v", err)
+		}
+		store = lbugStore
 	}
 	defer store.Close()
 
-	if err := db.InitSchema(store, cfg.EmbeddingDims); err != nil {
-		log.Fatalf("init schema: %v", err)
+	switch cfg.DBType {
+	case "neo4j":
+		if err := db.InitSchemaNeo4j(store, cfg.EmbeddingDims); err != nil {
+			log.Fatalf("init neo4j schema: %v", err)
+		}
+		db.MigrateSchemaNeo4j(store)
+	default:
+		if err := db.InitSchema(store, cfg.EmbeddingDims); err != nil {
+			log.Fatalf("init schema: %v", err)
+		}
+		db.MigrateSchema(store)
 	}
-	db.MigrateSchema(store)
 
 	if err := db.CheckEmbeddingDims(store, cfg.EmbeddingDims); err != nil {
 		log.Fatalf("schema check: %v", err)
@@ -79,7 +104,7 @@ func main() {
 		EmbedDims:    cfg.EmbeddingDims,
 	})
 
-	engine := memory.NewEngine(store, llmClient)
+	engine := memory.NewEngine(store, llmClient, memory.WithEmbeddingDims(cfg.EmbeddingDims))
 	defer engine.Stop()
 
 	bp := backup.New(cfg.BackupType, cfg.LocalPath, cfg.User, map[string]string{
@@ -153,7 +178,11 @@ func main() {
 		os.Exit(0)
 	}()
 
-	fmt.Fprintf(os.Stderr, "SmritiMCP server started for user=%s db=%s backup=%s\n", cfg.User, cfg.DBPath, cfg.BackupType)
+	isolationInfo := ""
+	if cfg.DBType == "neo4j" {
+		isolationInfo = fmt.Sprintf(" isolation=%s", cfg.Neo4jIsolation)
+	}
+	fmt.Fprintf(os.Stderr, "SmritiMCP server started for user=%s db_type=%s db=%s%s backup=%s\n", cfg.User, cfg.DBType, store.Path(), isolationInfo, cfg.BackupType)
 
 	if err := server.ServeStdio(s); err != nil {
 		log.Printf("server error: %v", err)

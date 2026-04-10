@@ -22,6 +22,8 @@ func clearEnv() {
 		"CONSOLIDATION_INTERVAL", "GIT_BASE_URL", "S3_ENDPOINT", "S3_REGION",
 		"S3_ACCESS_KEY", "S3_SECRET_KEY", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL",
 		"EMBEDDING_BASE_URL", "EMBEDDING_API_KEY", "EMBEDDING_MODEL", "EMBEDDING_DIMS",
+		"DB_TYPE", "NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD", "NEO4J_DATABASE",
+		"NEO4J_ISOLATION",
 	}
 	for _, v := range envVars {
 		os.Unsetenv(v)
@@ -289,4 +291,132 @@ func TestGitRepoURL_NotGitHub(t *testing.T) {
 func TestS3Bucket_NotS3(t *testing.T) {
 	cfg := &Config{BackupType: "none"}
 	assert.Equal(t, "", cfg.S3Bucket())
+}
+
+func TestLoadFromEnv_DBTypeDefaults(t *testing.T) {
+	clearEnv()
+	defer clearEnv()
+
+	cfg, err := LoadFromEnv()
+	require.NoError(t, err)
+
+	assert.Equal(t, "ladybug", cfg.DBType)
+	assert.Equal(t, "tenant", cfg.Neo4jIsolation)
+	assert.Equal(t, "neo4j", cfg.Neo4jDatabase)
+}
+
+func TestLoadFromEnv_InvalidDBType(t *testing.T) {
+	clearEnv()
+	defer clearEnv()
+
+	os.Setenv("DB_TYPE", "postgres")
+
+	_, err := LoadFromEnv()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid DB_TYPE")
+}
+
+func TestLoadFromEnv_Neo4jRequiresURI(t *testing.T) {
+	clearEnv()
+	defer clearEnv()
+
+	os.Setenv("DB_TYPE", "neo4j")
+	os.Setenv("NEO4J_USERNAME", "neo4j")
+	os.Setenv("NEO4J_PASSWORD", "secret")
+
+	_, err := LoadFromEnv()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "NEO4J_URI is required")
+}
+
+func TestLoadFromEnv_Neo4jRequiresUsername(t *testing.T) {
+	clearEnv()
+	defer clearEnv()
+
+	os.Setenv("DB_TYPE", "neo4j")
+	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
+	os.Setenv("NEO4J_PASSWORD", "secret")
+
+	_, err := LoadFromEnv()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "NEO4J_USERNAME is required")
+}
+
+func TestLoadFromEnv_Neo4jRequiresPassword(t *testing.T) {
+	clearEnv()
+	defer clearEnv()
+
+	os.Setenv("DB_TYPE", "neo4j")
+	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
+	os.Setenv("NEO4J_USERNAME", "neo4j")
+
+	_, err := LoadFromEnv()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "NEO4J_PASSWORD is required")
+}
+
+func TestLoadFromEnv_InvalidNeo4jIsolation(t *testing.T) {
+	clearEnv()
+	defer clearEnv()
+
+	os.Setenv("NEO4J_ISOLATION", "magic")
+
+	_, err := LoadFromEnv()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid NEO4J_ISOLATION")
+}
+
+func TestLoadFromEnv_Neo4jIsolationTenant(t *testing.T) {
+	clearEnv()
+	defer clearEnv()
+
+	os.Setenv("DB_TYPE", "neo4j")
+	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
+	os.Setenv("NEO4J_USERNAME", "neo4j")
+	os.Setenv("NEO4J_PASSWORD", "secret")
+	os.Setenv("NEO4J_ISOLATION", "tenant")
+	os.Setenv("ACCESSING_USER", "alice")
+
+	cfg, err := LoadFromEnv()
+	require.NoError(t, err)
+
+	assert.Equal(t, "tenant", cfg.Neo4jIsolation)
+	assert.Equal(t, "neo4j", cfg.Neo4jDatabase) // unchanged
+}
+
+func TestLoadFromEnv_Neo4jIsolationDatabase(t *testing.T) {
+	clearEnv()
+	defer clearEnv()
+
+	os.Setenv("DB_TYPE", "neo4j")
+	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
+	os.Setenv("NEO4J_USERNAME", "neo4j")
+	os.Setenv("NEO4J_PASSWORD", "secret")
+	os.Setenv("NEO4J_ISOLATION", "database")
+	os.Setenv("ACCESSING_USER", "alice")
+
+	cfg, err := LoadFromEnv()
+	require.NoError(t, err)
+
+	assert.Equal(t, "database", cfg.Neo4jIsolation)
+	assert.Equal(t, "alice", cfg.Neo4jDatabase) // auto-set from user
+}
+
+func TestLoadFromEnv_Neo4jIsolationDatabaseCustomDB(t *testing.T) {
+	clearEnv()
+	defer clearEnv()
+
+	os.Setenv("DB_TYPE", "neo4j")
+	os.Setenv("NEO4J_URI", "bolt://localhost:7687")
+	os.Setenv("NEO4J_USERNAME", "neo4j")
+	os.Setenv("NEO4J_PASSWORD", "secret")
+	os.Setenv("NEO4J_ISOLATION", "database")
+	os.Setenv("NEO4J_DATABASE", "custom_db")
+	os.Setenv("ACCESSING_USER", "alice")
+
+	cfg, err := LoadFromEnv()
+	require.NoError(t, err)
+
+	assert.Equal(t, "database", cfg.Neo4jIsolation)
+	assert.Equal(t, "custom_db", cfg.Neo4jDatabase) // user-specified, not overridden
 }

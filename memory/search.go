@@ -35,7 +35,7 @@ func (e *Engine) Search(ctx context.Context, req RecallRequest) ([]SearchResult,
 
 func (e *Engine) listEngrams(limit int) ([]SearchResult, error) {
 	query := fmt.Sprintf(`
-		MATCH (e:Engram)
+		MATCH (e:Engram)`+tenantFilter(e.store, "e")+`
 		RETURN e.id AS id, e.content AS content, e.summary AS summary,
 			e.memory_type AS memory_type, e.importance AS importance,
 			e.access_count AS access_count, e.decay_factor AS decay_factor,
@@ -45,7 +45,13 @@ func (e *Engine) listEngrams(limit int) ([]SearchResult, error) {
 		ORDER BY e.last_accessed_at DESC
 		LIMIT %d`, limit)
 
-	rows, err := e.store.QueryRows(query)
+	var rows []map[string]any
+	var err error
+	if isTenant(e.store) {
+		rows, err = e.store.PreparedQueryRows(query, tenantParam(e.store, nil))
+	} else {
+		rows, err = e.store.QueryRows(query)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("list engrams: %w", err)
 	}
@@ -77,15 +83,7 @@ func (e *Engine) vectorOnlySearch(ctx context.Context, query string, limit int) 
 
 func (e *Engine) tryHNSWSearchDirect(queryEmbedding []float32, limit int) []SearchResult {
 	embStr := float32SliceToString(queryEmbedding)
-	q := fmt.Sprintf(`CALL QUERY_VECTOR_INDEX('Engram', 'engram_embedding_idx', %s, %d)
-		RETURN node.id AS id, node.content AS content, node.summary AS summary,
-			node.memory_type AS memory_type, node.importance AS importance,
-			node.access_count AS access_count, node.decay_factor AS decay_factor,
-			node.embedding AS embedding, node.source AS source, node.tags AS tags,
-			node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-			node.cluster_id AS cluster_id,
-			distance
-		ORDER BY distance`, embStr, limit)
+	q := vectorSearchQuery(e.store, "engram_embedding_idx", embStr, limit)
 	rows, err := e.store.QueryRows(q)
 	if err != nil {
 		return nil
@@ -104,7 +102,7 @@ func (e *Engine) tryHNSWSearchDirect(queryEmbedding []float32, limit int) []Sear
 }
 
 func (e *Engine) vectorSearchFallbackDirect(queryEmbedding []float32, limit int) ([]SearchResult, error) {
-	q := `MATCH (e:Engram)
+	q := `MATCH (e:Engram)` + tenantFilter(e.store, "e") + `
 		RETURN e.id AS id, e.content AS content, e.summary AS summary,
 			e.memory_type AS memory_type, e.importance AS importance,
 			e.access_count AS access_count, e.decay_factor AS decay_factor,
@@ -112,7 +110,13 @@ func (e *Engine) vectorSearchFallbackDirect(queryEmbedding []float32, limit int)
 			e.created_at AS created_at, e.last_accessed_at AS last_accessed_at,
 			e.cluster_id AS cluster_id`
 
-	rows, err := e.store.QueryRows(q)
+	var rows []map[string]any
+	var err error
+	if isTenant(e.store) {
+		rows, err = e.store.PreparedQueryRows(q, tenantParam(e.store, nil))
+	} else {
+		rows, err = e.store.QueryRows(q)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
@@ -152,17 +156,24 @@ func (e *Engine) vectorSearchFallbackDirect(queryEmbedding []float32, limit int)
 }
 
 func (e *Engine) ftsSearch(query string, limit int) ([]SearchResult, error) {
-	rows, err := e.store.PreparedQueryRows(
-		fmt.Sprintf(`CALL query_fts_index('Engram', 'engram_fts_idx', $q, top_k := %d)
-		RETURN node.id AS id, node.content AS content, node.summary AS summary,
-			node.memory_type AS memory_type, node.importance AS importance,
-			node.access_count AS access_count, node.decay_factor AS decay_factor,
-			node.embedding AS embedding, node.source AS source, node.tags AS tags,
-			node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-			node.cluster_id AS cluster_id,
-			score`, limit),
-		map[string]any{"q": query},
-	)
+	var rows []map[string]any
+	var err error
+	if e.store.DBType() == "neo4j" {
+		q := ftsSearchQuery(e.store, "engram_fts_idx", query, limit)
+		rows, err = e.store.QueryRows(q)
+	} else {
+		rows, err = e.store.PreparedQueryRows(
+			fmt.Sprintf(`CALL query_fts_index('Engram', 'engram_fts_idx', $q, top_k := %d)
+			RETURN node.id AS id, node.content AS content, node.summary AS summary,
+				node.memory_type AS memory_type, node.importance AS importance,
+				node.access_count AS access_count, node.decay_factor AS decay_factor,
+				node.embedding AS embedding, node.source AS source, node.tags AS tags,
+				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
+				node.cluster_id AS cluster_id,
+				score`, limit),
+			map[string]any{"q": query},
+		)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("fts search: %w", err)
 	}
@@ -223,7 +234,7 @@ func (e *Engine) Forget(engramID string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	params := map[string]any{"eid": engramID}
+	params := tenantParam(e.store, map[string]any{"eid": engramID})
 	e.store.PreparedExecute(
 		`MATCH (e:Engram {id: $eid})-[r:EncodedBy]->() DELETE r`, params)
 	e.store.PreparedExecute(

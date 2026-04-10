@@ -22,22 +22,35 @@ type leidenState struct {
 }
 
 type Engine struct {
-	store  *db.Store
-	llm    *llm.Client
-	mu     sync.RWMutex
-	stopCh chan struct{}
-	leiden leidenState
+	store         db.Store
+	llm           *llm.Client
+	mu            sync.RWMutex
+	stopCh        chan struct{}
+	leiden        leidenState
+	embeddingDims int
 }
 
-func NewEngine(store *db.Store, llmClient *llm.Client) *Engine {
-	return &Engine{
+func NewEngine(store db.Store, llmClient *llm.Client, opts ...EngineOption) *Engine {
+	e := &Engine{
 		store:  store,
 		llm:    llmClient,
 		stopCh: make(chan struct{}),
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
-func (e *Engine) Store() *db.Store {
+type EngineOption func(*Engine)
+
+func WithEmbeddingDims(dims int) EngineOption {
+	return func(e *Engine) {
+		e.embeddingDims = dims
+	}
+}
+
+func (e *Engine) Store() db.Store {
 	return e.store
 }
 

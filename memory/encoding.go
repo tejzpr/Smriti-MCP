@@ -57,32 +57,34 @@ func (e *Engine) Encode(ctx context.Context, req StoreRequest) (*Engram, error) 
 	}
 
 	embeddingStr := float32SliceToString(embedding)
+	tsFn := tsFunc(e.store)
+	tp := tenantProp(e.store)
 	createQuery := fmt.Sprintf(`CREATE (e:Engram {
-		id: $id,
+		%sid: $id,
 		content: $content,
 		summary: $summary,
 		memory_type: $memtype,
 		importance: $importance,
 		access_count: 0,
-		created_at: timestamp($ts),
-		last_accessed_at: timestamp($ts),
+		created_at: %s($ts),
+		last_accessed_at: %s($ts),
 		decay_factor: 1.0,
 		embedding: %s,
 		source: $source,
 		tags: $tags,
 		cluster_id: -1
-	})`, embeddingStr)
+	})`, tp, tsFn, tsFn, embeddingStr)
 
-	if err := e.store.PreparedExecute(createQuery, map[string]any{
+	if err := e.store.PreparedExecute(createQuery, tenantParam(e.store, map[string]any{
 		"id":         engramID,
 		"content":    req.Content,
 		"summary":    extraction.Summary,
 		"memtype":    extraction.MemoryType,
 		"importance": importance,
-		"ts":         now.Format("2006-01-02 15:04:05"),
+		"ts":         now.Format(tsFormat(e.store)),
 		"source":     req.Source,
 		"tags":       tags,
-	}); err != nil {
+	})); err != nil {
 		return nil, fmt.Errorf("create engram: %w", err)
 	}
 
@@ -102,10 +104,13 @@ func (e *Engine) Encode(ctx context.Context, req StoreRequest) (*Engram, error) 
 func (e *Engine) createOrGetCue(ctx context.Context, name, cueType, engramID string, now time.Time) error {
 	cueID := fmt.Sprintf("cue-%s-%s", cueType, name)
 	cueID = strings.ReplaceAll(cueID, " ", "-")
+	if isTenant(e.store) {
+		cueID = e.store.TenantUser() + ":" + cueID
+	}
 
 	rows, err := e.store.PreparedQueryRows(
-		"MATCH (c:Cue {id: $cueID}) RETURN c.id",
-		map[string]any{"cueID": cueID},
+		"MATCH (c:Cue {id: $cueID})"+tenantFilter(e.store, "c")+" RETURN c.id",
+		tenantParam(e.store, map[string]any{"cueID": cueID}),
 	)
 	if err != nil {
 		return fmt.Errorf("check cue existence: %w", err)
@@ -118,25 +123,27 @@ func (e *Engine) createOrGetCue(ctx context.Context, name, cueType, engramID str
 		}
 		embStr := float32SliceToString(cueEmbedding)
 
+		tp := tenantProp(e.store)
 		createCue := fmt.Sprintf(`CREATE (c:Cue {
-			id: $cueID,
+			%sid: $cueID,
 			name: $name,
 			cue_type: $cueType,
 			embedding: %s
-		})`, embStr)
-		if err := e.store.PreparedExecute(createCue, map[string]any{
+		})`, tp, embStr)
+		if err := e.store.PreparedExecute(createCue, tenantParam(e.store, map[string]any{
 			"cueID":   cueID,
 			"name":    name,
 			"cueType": cueType,
-		}); err != nil {
+		})); err != nil {
 			return fmt.Errorf("create cue node: %w", err)
 		}
 	}
 
-	tsStr := now.Format("2006-01-02 15:04:05")
+	tsStr := now.Format(tsFormat(e.store))
+	tsFn := tsFunc(e.store)
 	if err := e.store.PreparedExecute(
-		`MATCH (e:Engram {id: $eid}), (c:Cue {id: $cid})
-		CREATE (e)-[:EncodedBy {strength: 1.0, created_at: timestamp($ts)}]->(c)`,
+		fmt.Sprintf(`MATCH (e:Engram {id: $eid}), (c:Cue {id: $cid})
+		CREATE (e)-[:EncodedBy {strength: 1.0, created_at: %s($ts)}]->(c)`, tsFn),
 		map[string]any{"eid": engramID, "cid": cueID, "ts": tsStr},
 	); err != nil {
 		return fmt.Errorf("link engram to cue: %w", err)
@@ -147,8 +154,8 @@ func (e *Engine) createOrGetCue(ctx context.Context, name, cueType, engramID str
 
 func (e *Engine) autoAssociate(ctx context.Context, engramID string, embedding []float32) error {
 	rows, err := e.store.PreparedQueryRows(
-		"MATCH (e:Engram) WHERE e.id <> $eid RETURN e.id AS id, e.embedding AS emb",
-		map[string]any{"eid": engramID},
+		"MATCH (e:Engram) WHERE e.id <> $eid"+tenantFilterAnd(e.store, "e")+" RETURN e.id AS id, e.embedding AS emb",
+		tenantParam(e.store, map[string]any{"eid": engramID}),
 	)
 	if err != nil {
 		return fmt.Errorf("query existing engrams: %w", err)
@@ -157,6 +164,7 @@ func (e *Engine) autoAssociate(ctx context.Context, engramID string, embedding [
 	var strongestID string
 	var strongestSim float64
 
+	tsFn := tsFunc(e.store)
 	for _, row := range rows {
 		otherID, ok := row["id"].(string)
 		if !ok {
@@ -171,13 +179,13 @@ func (e *Engine) autoAssociate(ctx context.Context, engramID string, embedding [
 		if sim > 0.7 {
 			now := time.Now()
 			if err := e.store.PreparedExecute(
-				`MATCH (e1:Engram {id: $eid1}), (e2:Engram {id: $eid2})
-				CREATE (e1)-[:AssociatedWith {relation_type: 'semantic', strength: $str, created_at: timestamp($ts)}]->(e2)`,
+				fmt.Sprintf(`MATCH (e1:Engram {id: $eid1}), (e2:Engram {id: $eid2})
+				CREATE (e1)-[:AssociatedWith {relation_type: 'semantic', strength: $str, created_at: %s($ts)}]->(e2)`, tsFn),
 				map[string]any{
 					"eid1": engramID,
 					"eid2": otherID,
 					"str":  sim,
-					"ts":   now.Format("2006-01-02 15:04:05"),
+					"ts":   now.Format(tsFormat(e.store)),
 				},
 			); err != nil {
 				return fmt.Errorf("create association: %w", err)
@@ -192,14 +200,14 @@ func (e *Engine) autoAssociate(ctx context.Context, engramID string, embedding [
 	if strongestID != "" {
 		cRows, err := e.store.PreparedQueryRows(
 			`MATCH (e:Engram {id: $eid}) RETURN e.cluster_id AS cluster_id`,
-			map[string]any{"eid": strongestID},
+			tenantParam(e.store, map[string]any{"eid": strongestID}),
 		)
 		if err == nil && len(cRows) > 0 {
 			cid := toInt64(cRows[0]["cluster_id"])
 			if cid >= 0 {
 				_ = e.store.PreparedExecute(
-					`MATCH (e:Engram {id: $eid}) SET e.cluster_id = $cid`,
-					map[string]any{"eid": engramID, "cid": cid},
+					`MATCH (e:Engram {id: $eid})`+tenantFilter(e.store, "e")+` SET e.cluster_id = $cid`,
+					tenantParam(e.store, map[string]any{"eid": engramID, "cid": cid}),
 				)
 			}
 		}
