@@ -69,7 +69,7 @@ func vectorSearchQuery(store db.Store, indexName string, embStr string, limit in
 				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
 				node.cluster_id AS cluster_id,
 				score AS distance
-			ORDER BY score DESC`, limit, embStr)
+			ORDER BY score ASC`, limit, embStr)
 	default:
 		// LadybugDB
 		return fmt.Sprintf(
