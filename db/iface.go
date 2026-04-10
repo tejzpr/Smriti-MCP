@@ -34,7 +34,7 @@ type Store interface {
 	// Path returns a human-readable connection string or path.
 	Path() string
 
-	// DBType returns the backend type identifier ("ladybug" or "neo4j").
+	// DBType returns the backend type identifier ("ladybug", "neo4j", or "falkordb").
 	DBType() string
 
 	// TenantUser returns the tenant user identifier for multi-tenant
