@@ -42,3 +42,5 @@ lib-ladybug/
 tmp/
 
 *.log
+
+*_e2e_test.go

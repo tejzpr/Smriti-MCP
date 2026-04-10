@@ -83,12 +83,7 @@ func (e *Engine) fanOutCueSearch(entities, keywords []string, seen map[string]*S
 		rows, err := e.store.PreparedQueryRows(
 			`MATCH (e:Engram)-[:EncodedBy]->(c:Cue)
 			WHERE c.name = $cueName`+tenantFilterAnd(e.store, "e")+`
-			RETURN e.id AS id, e.content AS content, e.summary AS summary,
-				e.memory_type AS memory_type, e.importance AS importance,
-				e.access_count AS access_count, e.decay_factor AS decay_factor,
-				e.embedding AS embedding, e.source AS source, e.tags AS tags,
-				e.created_at AS created_at, e.last_accessed_at AS last_accessed_at,
-				e.cluster_id AS cluster_id`,
+			RETURN `+engramCols(e.store, "e"),
 			tenantParam(e.store, map[string]any{"cueName": cueName}),
 		)
 		if err != nil {
@@ -137,12 +132,7 @@ func (e *Engine) tryHNSWSearch(queryEmbedding []float32, limit int, seen map[str
 
 func (e *Engine) vectorSearchFallback(queryEmbedding []float32, limit int, seen map[string]*SearchResult) error {
 	query := `MATCH (e:Engram)` + tenantFilter(e.store, "e") + `
-		RETURN e.id AS id, e.content AS content, e.summary AS summary,
-			e.memory_type AS memory_type, e.importance AS importance,
-			e.access_count AS access_count, e.decay_factor AS decay_factor,
-			e.embedding AS embedding, e.source AS source, e.tags AS tags,
-			e.created_at AS created_at, e.last_accessed_at AS last_accessed_at,
-			e.cluster_id AS cluster_id`
+		RETURN ` + engramCols(e.store, "e")
 	var rows []map[string]any
 	var err error
 	if isTenant(e.store) {
@@ -206,12 +196,7 @@ func (e *Engine) multiHopExpand(seen map[string]*SearchResult, maxHops int) erro
 		rows, err := e.store.PreparedQueryRows(
 			`MATCH (e1:Engram)-[r:AssociatedWith]->(e2:Engram)
 			WHERE e1.id IN $ids AND r.strength > 0.5`+tenantFilterAnd(e.store, "e1")+`
-			RETURN e2.id AS id, e2.content AS content, e2.summary AS summary,
-				e2.memory_type AS memory_type, e2.importance AS importance,
-				e2.access_count AS access_count, e2.decay_factor AS decay_factor,
-				e2.embedding AS embedding, e2.source AS source, e2.tags AS tags,
-				e2.created_at AS created_at, e2.last_accessed_at AS last_accessed_at,
-				e2.cluster_id AS cluster_id,
+			RETURN `+engramCols(e.store, "e2")+`,
 				r.strength AS strength`,
 			tenantParam(e.store, map[string]any{"ids": idList}),
 		)
@@ -335,16 +320,31 @@ func rowToEngram(row map[string]any) Engram {
 	if v, ok := row["tags"].(string); ok {
 		eng.Tags = v
 	}
-	if v, ok := row["created_at"].(time.Time); ok {
-		eng.CreatedAt = v
-	}
-	if v, ok := row["last_accessed_at"].(time.Time); ok {
-		eng.LastAccessedAt = v
-	}
+	eng.CreatedAt = toTime(row["created_at"])
+	eng.LastAccessedAt = toTime(row["last_accessed_at"])
 	if v, ok := row["cluster_id"]; ok {
 		eng.ClusterID = toInt64(v)
 	}
 	return eng
+}
+
+func toTime(v any) time.Time {
+	switch val := v.(type) {
+	case time.Time:
+		return val
+	case string:
+		// FalkorDB returns datetime as string via toString()
+		for _, layout := range []string{
+			"2006-01-02T15:04:05",
+			"2006-01-02 15:04:05",
+			time.RFC3339,
+		} {
+			if t, err := time.Parse(layout, val); err == nil {
+				return t
+			}
+		}
+	}
+	return time.Time{}
 }
 
 func toFloat64(v any) float64 {

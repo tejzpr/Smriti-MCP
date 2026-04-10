@@ -150,8 +150,12 @@ func (s *FalkorStore) queryRowsInternal(query string, params map[string]any) ([]
 	var rows []map[string]any
 	for result.Next() {
 		record := result.Record()
-		row := make(map[string]any)
-		for _, key := range record.Keys() {
+		if record == nil {
+			continue
+		}
+		keys := record.Keys()
+		row := make(map[string]any, len(keys))
+		for _, key := range keys {
 			val, _ := record.Get(key)
 			row[key] = falkorValueToGo(val)
 		}

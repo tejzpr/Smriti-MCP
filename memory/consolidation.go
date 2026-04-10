@@ -57,7 +57,7 @@ func (e *Engine) applyDecay() error {
 	q := `
 		MATCH (e:Engram)` + tenantFilter(e.store, "e") + `
 		RETURN e.id AS id, e.decay_factor AS decay_factor,
-			e.last_accessed_at AS last_accessed_at`
+			` + tsCol(e.store, "e.last_accessed_at") + ` AS last_accessed_at`
 	var rows []map[string]any
 	var err error
 	if isTenant(e.store) {
@@ -77,10 +77,7 @@ func (e *Engine) applyDecay() error {
 		}
 		currentDecay := toFloat64(row["decay_factor"])
 
-		var lastAccessed time.Time
-		if t, ok := row["last_accessed_at"].(time.Time); ok {
-			lastAccessed = t
-		}
+		lastAccessed := toTime(row["last_accessed_at"])
 
 		hoursSinceAccess := now.Sub(lastAccessed).Hours()
 		newDecay := computeDecay(currentDecay, hoursSinceAccess)

@@ -40,48 +40,65 @@ func tsFormat(store db.Store) string {
 	}
 }
 
+// tsCol wraps a datetime column expression so that the FalkorDB Go client
+// can parse it (the client lacks a localdatetime scalar type handler).
+//
+//	LadybugDB / Neo4j: e.created_at
+//	FalkorDB:          toString(e.created_at)
+func tsCol(store db.Store, expr string) string {
+	if store.DBType() == "falkordb" {
+		return "toString(" + expr + ")"
+	}
+	return expr
+}
+
+// engramCols returns the standard RETURN column projection for Engram queries.
+// The alias parameter is the node variable (e.g. "e" or "node").
+// For FalkorDB, datetime columns are wrapped in toString() because the
+// Go client lacks a localdatetime scalar type handler.
+func engramCols(store db.Store, alias string) string {
+	a := alias + "."
+	return fmt.Sprintf(
+		`%sid AS id, %scontent AS content, %ssummary AS summary,
+			%smemory_type AS memory_type, %simportance AS importance,
+			%saccess_count AS access_count, %sdecay_factor AS decay_factor,
+			%sembedding AS embedding, %ssource AS source, %stags AS tags,
+			%s AS created_at, %s AS last_accessed_at,
+			%scluster_id AS cluster_id`,
+		a, a, a, a, a, a, a, a, a, a,
+		tsCol(store, a+"created_at"),
+		tsCol(store, a+"last_accessed_at"),
+		a)
+}
+
 // vectorSearchQuery returns the Cypher query for a vector similarity search.
 //
 //	LadybugDB uses:  CALL QUERY_VECTOR_INDEX(label, index, embedding, k)
 //	Neo4j uses:      CALL db.index.vector.queryNodes(index, k, embedding)
 func vectorSearchQuery(store db.Store, indexName string, embStr string, limit int) string {
+	cols := engramCols(store, "node")
 	switch store.DBType() {
 	case "neo4j":
 		return fmt.Sprintf(
 			`CALL db.index.vector.queryNodes('%s', %d, %s)
 			YIELD node, score
-			RETURN node.id AS id, node.content AS content, node.summary AS summary,
-				node.memory_type AS memory_type, node.importance AS importance,
-				node.access_count AS access_count, node.decay_factor AS decay_factor,
-				node.embedding AS embedding, node.source AS source, node.tags AS tags,
-				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-				node.cluster_id AS cluster_id,
+			RETURN %s,
 				score AS distance
-			ORDER BY score DESC`, indexName, limit, embStr)
+			ORDER BY score DESC`, indexName, limit, embStr, cols)
 	case "falkordb":
 		return fmt.Sprintf(
 			`CALL db.idx.vector.queryNodes('Engram', 'embedding', %d, vecf32(%s))
 			YIELD node, score
-			RETURN node.id AS id, node.content AS content, node.summary AS summary,
-				node.memory_type AS memory_type, node.importance AS importance,
-				node.access_count AS access_count, node.decay_factor AS decay_factor,
-				node.embedding AS embedding, node.source AS source, node.tags AS tags,
-				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-				node.cluster_id AS cluster_id,
+			RETURN %s,
 				score AS distance
-			ORDER BY score ASC`, limit, embStr)
+			ORDER BY score ASC`, limit, embStr, cols)
 	default:
 		// LadybugDB
 		return fmt.Sprintf(
 			`CALL QUERY_VECTOR_INDEX('Engram', '%s', %s, %d)
-			RETURN node.id AS id, node.content AS content, node.summary AS summary,
-				node.memory_type AS memory_type, node.importance AS importance,
-				node.access_count AS access_count, node.decay_factor AS decay_factor,
-				node.embedding AS embedding, node.source AS source, node.tags AS tags,
-				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-				node.cluster_id AS cluster_id,
+			RETURN %s,
 				distance
-			ORDER BY distance`, indexName, embStr, limit)
+			ORDER BY distance`, indexName, embStr, limit, cols)
 	}
 }
 
@@ -90,46 +107,32 @@ func vectorSearchQuery(store db.Store, indexName string, embStr string, limit in
 //	LadybugDB uses:  CALL query_fts_index(label, index, query)
 //	Neo4j uses:      CALL db.index.fulltext.queryNodes(index, query)
 func ftsSearchQuery(store db.Store, indexName string, searchTerm string, limit int) string {
+	cols := engramCols(store, "node")
 	switch store.DBType() {
 	case "neo4j":
 		return fmt.Sprintf(
 			`CALL db.index.fulltext.queryNodes('%s', '%s')
 			YIELD node, score
-			RETURN node.id AS id, node.content AS content, node.summary AS summary,
-				node.memory_type AS memory_type, node.importance AS importance,
-				node.access_count AS access_count, node.decay_factor AS decay_factor,
-				node.embedding AS embedding, node.source AS source, node.tags AS tags,
-				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-				node.cluster_id AS cluster_id,
+			RETURN %s,
 				score
 			ORDER BY score DESC
-			LIMIT %d`, indexName, escapeCypher(searchTerm), limit)
+			LIMIT %d`, indexName, escapeCypher(searchTerm), cols, limit)
 	case "falkordb":
 		return fmt.Sprintf(
 			`CALL db.idx.fulltext.queryNodes('Engram', '%s')
 			YIELD node, score
-			RETURN node.id AS id, node.content AS content, node.summary AS summary,
-				node.memory_type AS memory_type, node.importance AS importance,
-				node.access_count AS access_count, node.decay_factor AS decay_factor,
-				node.embedding AS embedding, node.source AS source, node.tags AS tags,
-				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-				node.cluster_id AS cluster_id,
+			RETURN %s,
 				score
 			ORDER BY score DESC
-			LIMIT %d`, escapeCypher(searchTerm), limit)
+			LIMIT %d`, escapeCypher(searchTerm), cols, limit)
 	default:
 		// LadybugDB
 		return fmt.Sprintf(
 			`CALL query_fts_index('Engram', '%s', '%s')
-			RETURN node.id AS id, node.content AS content, node.summary AS summary,
-				node.memory_type AS memory_type, node.importance AS importance,
-				node.access_count AS access_count, node.decay_factor AS decay_factor,
-				node.embedding AS embedding, node.source AS source, node.tags AS tags,
-				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-				node.cluster_id AS cluster_id,
+			RETURN %s,
 				score
 			ORDER BY score DESC
-			LIMIT %d`, indexName, escapeCypher(searchTerm), limit)
+			LIMIT %d`, indexName, escapeCypher(searchTerm), cols, limit)
 	}
 }
 

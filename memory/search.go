@@ -36,14 +36,9 @@ func (e *Engine) Search(ctx context.Context, req RecallRequest) ([]SearchResult,
 func (e *Engine) listEngrams(limit int) ([]SearchResult, error) {
 	query := fmt.Sprintf(`
 		MATCH (e:Engram)`+tenantFilter(e.store, "e")+`
-		RETURN e.id AS id, e.content AS content, e.summary AS summary,
-			e.memory_type AS memory_type, e.importance AS importance,
-			e.access_count AS access_count, e.decay_factor AS decay_factor,
-			e.embedding AS embedding, e.source AS source, e.tags AS tags,
-			e.created_at AS created_at, e.last_accessed_at AS last_accessed_at,
-			e.cluster_id AS cluster_id
+		RETURN %s
 		ORDER BY e.last_accessed_at DESC
-		LIMIT %d`, limit)
+		LIMIT %d`, engramCols(e.store, "e"), limit)
 
 	var rows []map[string]any
 	var err error
@@ -103,12 +98,7 @@ func (e *Engine) tryHNSWSearchDirect(queryEmbedding []float32, limit int) []Sear
 
 func (e *Engine) vectorSearchFallbackDirect(queryEmbedding []float32, limit int) ([]SearchResult, error) {
 	q := `MATCH (e:Engram)` + tenantFilter(e.store, "e") + `
-		RETURN e.id AS id, e.content AS content, e.summary AS summary,
-			e.memory_type AS memory_type, e.importance AS importance,
-			e.access_count AS access_count, e.decay_factor AS decay_factor,
-			e.embedding AS embedding, e.source AS source, e.tags AS tags,
-			e.created_at AS created_at, e.last_accessed_at AS last_accessed_at,
-			e.cluster_id AS cluster_id`
+		RETURN ` + engramCols(e.store, "e")
 
 	var rows []map[string]any
 	var err error
@@ -158,19 +148,15 @@ func (e *Engine) vectorSearchFallbackDirect(queryEmbedding []float32, limit int)
 func (e *Engine) ftsSearch(query string, limit int) ([]SearchResult, error) {
 	var rows []map[string]any
 	var err error
-	if e.store.DBType() == "neo4j" {
+	switch e.store.DBType() {
+	case "neo4j", "falkordb":
 		q := ftsSearchQuery(e.store, "engram_fts_idx", query, limit)
 		rows, err = e.store.QueryRows(q)
-	} else {
+	default:
 		rows, err = e.store.PreparedQueryRows(
 			fmt.Sprintf(`CALL query_fts_index('Engram', 'engram_fts_idx', $q, top_k := %d)
-			RETURN node.id AS id, node.content AS content, node.summary AS summary,
-				node.memory_type AS memory_type, node.importance AS importance,
-				node.access_count AS access_count, node.decay_factor AS decay_factor,
-				node.embedding AS embedding, node.source AS source, node.tags AS tags,
-				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-				node.cluster_id AS cluster_id,
-				score`, limit),
+			RETURN %s,
+				score`, limit, engramCols(e.store, "node")),
 			map[string]any{"q": query},
 		)
 	}
