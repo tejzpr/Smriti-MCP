@@ -25,6 +25,11 @@ RUN set -e && \
 COPY . .
 RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /smriti-mcp .
 
+# Copy liblbug shared libraries to a known staging location
+RUN mkdir -p /staging/lib && \
+    LBUG_DIR=$(go mod download -json github.com/LadybugDB/go-ladybug@v0.13.1 | grep '"Dir"' | cut -d'"' -f4) && \
+    find "$LBUG_DIR/lib/dynamic" -name '*.so*' -exec cp -a {} /staging/lib/ \;
+
 # Stage 2: Runtime
 FROM debian:trixie-slim
 
@@ -33,9 +38,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /smriti-mcp /usr/local/bin/smriti-mcp
-COPY --from=builder /go/pkg/mod/github.com/!ladybug!d!b/go-ladybug@v0.13.1/lib/dynamic /usr/local/lib/lbug
+COPY --from=builder /staging/lib/ /usr/local/lib/
 
-ENV LD_LIBRARY_PATH=/usr/local/lib/lbug/linux-amd64:/usr/local/lib/lbug/linux-arm64
+RUN ldconfig
 
 RUN useradd -m smriti
 USER smriti
