@@ -49,9 +49,8 @@ jobs:
           echo "LBUG_DIR=$LBUG_DIR"
           chmod -R u+w "$LBUG_DIR"
 
-          # Use the matching native library release tag
-          RELEASE_TAG="${LBUG_VER}"
-          BASE_URL="https://github.com/LadybugDB/ladybug/releases/download/${RELEASE_TAG}"
+          # Native library is ABI-compatible; use latest release which has prebuilt assets
+          BASE_URL="https://github.com/LadybugDB/ladybug/releases/latest/download"
 
           OS=$(uname -s)
           ARCH=$(uname -m)
@@ -125,6 +124,7 @@ jobs:
           OS=$(uname -s)
           LBUG_VER="${{ steps.lbug-version.outputs.version }}"
           LBUG_DIR=$(go mod download -json github.com/LadybugDB/go-ladybug@${LBUG_VER} | grep '"Dir"' | cut -d'"' -f4)
+          echo "LBUG_DIR=$LBUG_DIR"
           ARCHIVE_NAME=""
 
           case "$OS" in

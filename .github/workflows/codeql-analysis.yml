@@ -57,7 +57,7 @@ jobs:
         ASSET="liblbug-linux-${ARCH}.tar.gz"
         LIB_DIR="$LBUG_DIR/lib/dynamic/linux-${GOARCH}"
         mkdir -p "$LIB_DIR"
-        curl -fL -o /tmp/liblbug.tar.gz "https://github.com/LadybugDB/ladybug/releases/download/${LBUG_VER}/${ASSET}"
+        curl -fL -o /tmp/liblbug.tar.gz "https://github.com/LadybugDB/ladybug/releases/latest/download/${ASSET}"
         mkdir -p /tmp/liblbug && tar -xzf /tmp/liblbug.tar.gz -C /tmp/liblbug
         find /tmp/liblbug -name '*.so*' -exec cp {} "$LIB_DIR/" \;
 
