@@ -65,6 +65,18 @@ func main() {
 			log.Fatalf("open neo4j: %v", err)
 		}
 		store = neo4jStore
+	case "falkordb":
+		falkorStore, err := db.OpenFalkor(db.FalkorConfig{
+			Addr:      cfg.FalkorAddr,
+			Password:  cfg.FalkorPassword,
+			GraphName: cfg.FalkorGraphName,
+			Isolation: cfg.FalkorIsolation,
+			User:      cfg.User,
+		})
+		if err != nil {
+			log.Fatalf("open falkordb: %v", err)
+		}
+		store = falkorStore
 	default:
 		if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
 			log.Fatalf("create db dir: %v", err)
@@ -83,6 +95,11 @@ func main() {
 			log.Fatalf("init neo4j schema: %v", err)
 		}
 		db.MigrateSchemaNeo4j(store)
+	case "falkordb":
+		if err := db.InitSchemaFalkor(store, cfg.EmbeddingDims); err != nil {
+			log.Fatalf("init falkordb schema: %v", err)
+		}
+		db.MigrateSchemaFalkor(store)
 	default:
 		if err := db.InitSchema(store, cfg.EmbeddingDims); err != nil {
 			log.Fatalf("init schema: %v", err)
@@ -179,8 +196,11 @@ func main() {
 	}()
 
 	isolationInfo := ""
-	if cfg.DBType == "neo4j" {
+	switch cfg.DBType {
+	case "neo4j":
 		isolationInfo = fmt.Sprintf(" isolation=%s", cfg.Neo4jIsolation)
+	case "falkordb":
+		isolationInfo = fmt.Sprintf(" isolation=%s", cfg.FalkorIsolation)
 	}
 	fmt.Fprintf(os.Stderr, "SmritiMCP server started for user=%s db_type=%s db=%s%s backup=%s\n", cfg.User, cfg.DBType, store.Path(), isolationInfo, cfg.BackupType)
 

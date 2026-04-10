@@ -18,10 +18,12 @@ import (
 //	LadybugDB:  timestamp('2006-01-02 15:04:05')
 //	Neo4j:      localdatetime('2006-01-02T15:04:05')
 func tsFunc(store db.Store) string {
-	if store.DBType() == "neo4j" {
+	switch store.DBType() {
+	case "neo4j", "falkordb":
 		return "localdatetime"
+	default:
+		return "timestamp"
 	}
-	return "timestamp"
 }
 
 // tsFormat returns the Go time.Format layout string appropriate for the
@@ -30,10 +32,12 @@ func tsFunc(store db.Store) string {
 //	LadybugDB: "2006-01-02 15:04:05"  (space separator)
 //	Neo4j:     "2006-01-02T15:04:05"  (ISO 8601 with T)
 func tsFormat(store db.Store) string {
-	if store.DBType() == "neo4j" {
+	switch store.DBType() {
+	case "neo4j", "falkordb":
 		return "2006-01-02T15:04:05"
+	default:
+		return "2006-01-02 15:04:05"
 	}
-	return "2006-01-02 15:04:05"
 }
 
 // vectorSearchQuery returns the Cypher query for a vector similarity search.
@@ -41,7 +45,8 @@ func tsFormat(store db.Store) string {
 //	LadybugDB uses:  CALL QUERY_VECTOR_INDEX(label, index, embedding, k)
 //	Neo4j uses:      CALL db.index.vector.queryNodes(index, k, embedding)
 func vectorSearchQuery(store db.Store, indexName string, embStr string, limit int) string {
-	if store.DBType() == "neo4j" {
+	switch store.DBType() {
+	case "neo4j":
 		return fmt.Sprintf(
 			`CALL db.index.vector.queryNodes('%s', %d, %s)
 			YIELD node, score
@@ -53,18 +58,31 @@ func vectorSearchQuery(store db.Store, indexName string, embStr string, limit in
 				node.cluster_id AS cluster_id,
 				score AS distance
 			ORDER BY score DESC`, indexName, limit, embStr)
+	case "falkordb":
+		return fmt.Sprintf(
+			`CALL db.idx.vector.queryNodes('Engram', 'embedding', %d, vecf32(%s))
+			YIELD node, score
+			RETURN node.id AS id, node.content AS content, node.summary AS summary,
+				node.memory_type AS memory_type, node.importance AS importance,
+				node.access_count AS access_count, node.decay_factor AS decay_factor,
+				node.embedding AS embedding, node.source AS source, node.tags AS tags,
+				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
+				node.cluster_id AS cluster_id,
+				score AS distance
+			ORDER BY score DESC`, limit, embStr)
+	default:
+		// LadybugDB
+		return fmt.Sprintf(
+			`CALL QUERY_VECTOR_INDEX('Engram', '%s', %s, %d)
+			RETURN node.id AS id, node.content AS content, node.summary AS summary,
+				node.memory_type AS memory_type, node.importance AS importance,
+				node.access_count AS access_count, node.decay_factor AS decay_factor,
+				node.embedding AS embedding, node.source AS source, node.tags AS tags,
+				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
+				node.cluster_id AS cluster_id,
+				distance
+			ORDER BY distance`, indexName, embStr, limit)
 	}
-	// LadybugDB
-	return fmt.Sprintf(
-		`CALL QUERY_VECTOR_INDEX('Engram', '%s', %s, %d)
-		RETURN node.id AS id, node.content AS content, node.summary AS summary,
-			node.memory_type AS memory_type, node.importance AS importance,
-			node.access_count AS access_count, node.decay_factor AS decay_factor,
-			node.embedding AS embedding, node.source AS source, node.tags AS tags,
-			node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-			node.cluster_id AS cluster_id,
-			distance
-		ORDER BY distance`, indexName, embStr, limit)
 }
 
 // ftsSearchQuery returns the Cypher query for a full-text search.
@@ -72,7 +90,8 @@ func vectorSearchQuery(store db.Store, indexName string, embStr string, limit in
 //	LadybugDB uses:  CALL query_fts_index(label, index, query)
 //	Neo4j uses:      CALL db.index.fulltext.queryNodes(index, query)
 func ftsSearchQuery(store db.Store, indexName string, searchTerm string, limit int) string {
-	if store.DBType() == "neo4j" {
+	switch store.DBType() {
+	case "neo4j":
 		return fmt.Sprintf(
 			`CALL db.index.fulltext.queryNodes('%s', '%s')
 			YIELD node, score
@@ -85,19 +104,33 @@ func ftsSearchQuery(store db.Store, indexName string, searchTerm string, limit i
 				score
 			ORDER BY score DESC
 			LIMIT %d`, indexName, escapeCypher(searchTerm), limit)
+	case "falkordb":
+		return fmt.Sprintf(
+			`CALL db.idx.fulltext.queryNodes('Engram', '%s')
+			YIELD node, score
+			RETURN node.id AS id, node.content AS content, node.summary AS summary,
+				node.memory_type AS memory_type, node.importance AS importance,
+				node.access_count AS access_count, node.decay_factor AS decay_factor,
+				node.embedding AS embedding, node.source AS source, node.tags AS tags,
+				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
+				node.cluster_id AS cluster_id,
+				score
+			ORDER BY score DESC
+			LIMIT %d`, escapeCypher(searchTerm), limit)
+	default:
+		// LadybugDB
+		return fmt.Sprintf(
+			`CALL query_fts_index('Engram', '%s', '%s')
+			RETURN node.id AS id, node.content AS content, node.summary AS summary,
+				node.memory_type AS memory_type, node.importance AS importance,
+				node.access_count AS access_count, node.decay_factor AS decay_factor,
+				node.embedding AS embedding, node.source AS source, node.tags AS tags,
+				node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
+				node.cluster_id AS cluster_id,
+				score
+			ORDER BY score DESC
+			LIMIT %d`, indexName, escapeCypher(searchTerm), limit)
 	}
-	// LadybugDB
-	return fmt.Sprintf(
-		`CALL query_fts_index('Engram', '%s', '%s')
-		RETURN node.id AS id, node.content AS content, node.summary AS summary,
-			node.memory_type AS memory_type, node.importance AS importance,
-			node.access_count AS access_count, node.decay_factor AS decay_factor,
-			node.embedding AS embedding, node.source AS source, node.tags AS tags,
-			node.created_at AS created_at, node.last_accessed_at AS last_accessed_at,
-			node.cluster_id AS cluster_id,
-			score
-		ORDER BY score DESC
-		LIMIT %d`, indexName, escapeCypher(searchTerm), limit)
 }
 
 // lenFunc returns the Cypher function for array length.
@@ -105,10 +138,23 @@ func ftsSearchQuery(store db.Store, indexName string, searchTerm string, limit i
 //	LadybugDB:  len(x)
 //	Neo4j:      size(x)
 func lenFunc(store db.Store) string {
-	if store.DBType() == "neo4j" {
+	switch store.DBType() {
+	case "neo4j", "falkordb":
 		return "size"
+	default:
+		return "len"
 	}
-	return "len"
+}
+
+// embeddingLiteral wraps an embedding array string for the target database.
+//
+//	LadybugDB / Neo4j: [0.1, 0.2, ...]
+//	FalkorDB:          vecf32([0.1, 0.2, ...])
+func embeddingLiteral(store db.Store, embStr string) string {
+	if store.DBType() == "falkordb" {
+		return "vecf32(" + embStr + ")"
+	}
+	return embStr
 }
 
 // escapeCypher escapes single quotes in a string for use in Cypher literals.

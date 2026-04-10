@@ -56,7 +56,7 @@ func (e *Engine) Encode(ctx context.Context, req StoreRequest) (*Engram, error) 
 		Tags:           tags,
 	}
 
-	embeddingStr := float32SliceToString(embedding)
+	embeddingStr := embeddingLiteral(e.store, float32SliceToString(embedding))
 	tsFn := tsFunc(e.store)
 	tp := tenantProp(e.store)
 	createQuery := fmt.Sprintf(`CREATE (e:Engram {
@@ -121,7 +121,7 @@ func (e *Engine) createOrGetCue(ctx context.Context, name, cueType, engramID str
 		if err != nil {
 			return fmt.Errorf("embed cue: %w", err)
 		}
-		embStr := float32SliceToString(cueEmbedding)
+		embStr := embeddingLiteral(e.store, float32SliceToString(cueEmbedding))
 
 		tp := tenantProp(e.store)
 		createCue := fmt.Sprintf(`CREATE (c:Cue {

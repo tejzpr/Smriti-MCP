@@ -22,7 +22,7 @@ type Config struct {
 	DBPath    string // {LocalPath}/memory.lbug
 
 	// Database backend
-	DBType string // "ladybug" (default) or "neo4j"
+	DBType string // "ladybug" (default), "neo4j", or "falkordb"
 
 	// Neo4j connection (only when DBType="neo4j")
 	Neo4jURI       string
@@ -30,6 +30,12 @@ type Config struct {
 	Neo4jPassword  string
 	Neo4jDatabase  string
 	Neo4jIsolation string // "tenant" (default) or "database"
+
+	// FalkorDB connection (only when DBType="falkordb")
+	FalkorAddr      string
+	FalkorPassword  string
+	FalkorGraphName string
+	FalkorIsolation string // "tenant" (default) or "graph"
 
 	// Backup
 	BackupType         string // "none", "github", "s3"
@@ -90,8 +96,8 @@ func LoadFromEnv() (*Config, error) {
 	if cfg.DBType == "" {
 		cfg.DBType = "ladybug"
 	}
-	if cfg.DBType != "ladybug" && cfg.DBType != "neo4j" {
-		return nil, fmt.Errorf("invalid DB_TYPE: %q (must be ladybug or neo4j)", cfg.DBType)
+	if cfg.DBType != "ladybug" && cfg.DBType != "neo4j" && cfg.DBType != "falkordb" {
+		return nil, fmt.Errorf("invalid DB_TYPE: %q (must be ladybug, neo4j, or falkordb)", cfg.DBType)
 	}
 
 	// Neo4j connection config
@@ -123,6 +129,30 @@ func LoadFromEnv() (*Config, error) {
 		// In database isolation mode, use user name as the database
 		if cfg.Neo4jIsolation == "database" && cfg.Neo4jDatabase == "neo4j" {
 			cfg.Neo4jDatabase = cfg.User
+		}
+	}
+
+	// FalkorDB connection config
+	cfg.FalkorAddr = os.Getenv("FALKOR_ADDR")
+	if cfg.FalkorAddr == "" {
+		cfg.FalkorAddr = "localhost:6379"
+	}
+	cfg.FalkorPassword = os.Getenv("FALKOR_PASSWORD")
+	cfg.FalkorGraphName = os.Getenv("FALKOR_GRAPH")
+	if cfg.FalkorGraphName == "" {
+		cfg.FalkorGraphName = "smriti"
+	}
+	cfg.FalkorIsolation = strings.ToLower(os.Getenv("FALKOR_ISOLATION"))
+	if cfg.FalkorIsolation == "" {
+		cfg.FalkorIsolation = "tenant"
+	}
+	if cfg.FalkorIsolation != "tenant" && cfg.FalkorIsolation != "graph" {
+		return nil, fmt.Errorf("invalid FALKOR_ISOLATION: %q (must be tenant or graph)", cfg.FalkorIsolation)
+	}
+	if cfg.DBType == "falkordb" {
+		// In graph isolation mode, use user name as the graph name
+		if cfg.FalkorIsolation == "graph" && cfg.FalkorGraphName == "smriti" {
+			cfg.FalkorGraphName = cfg.User + "_smriti"
 		}
 	}
 
