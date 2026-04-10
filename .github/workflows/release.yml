@@ -33,12 +33,25 @@ jobs:
         run: go mod download
         shell: bash
 
+      - name: Determine LadybugDB version from go.mod
+        id: lbug-version
+        run: |
+          LBUG_VER=$(grep 'github.com/LadybugDB/go-ladybug' go.mod | awk '{print $2}')
+          echo "version=${LBUG_VER}" >> $GITHUB_OUTPUT
+          echo "LadybugDB version: ${LBUG_VER}"
+        shell: bash
+
       - name: Download LadybugDB native library
         run: |
           set -e
-          LBUG_DIR=$(go mod download -json github.com/LadybugDB/go-ladybug@v0.13.1 | grep '"Dir"' | cut -d'"' -f4)
+          LBUG_VER="${{ steps.lbug-version.outputs.version }}"
+          LBUG_DIR=$(go mod download -json github.com/LadybugDB/go-ladybug@${LBUG_VER} | grep '"Dir"' | cut -d'"' -f4)
           echo "LBUG_DIR=$LBUG_DIR"
           chmod -R u+w "$LBUG_DIR"
+
+          # Use the matching native library release tag
+          RELEASE_TAG="${LBUG_VER}"
+          BASE_URL="https://github.com/LadybugDB/ladybug/releases/download/${RELEASE_TAG}"
 
           OS=$(uname -s)
           ARCH=$(uname -m)
@@ -48,15 +61,16 @@ jobs:
               ASSET="liblbug-linux-${ARCH}.tar.gz"
               LIB_DIR="$LBUG_DIR/lib/dynamic/linux-${GOARCH}"
               mkdir -p "$LIB_DIR"
-              curl -L -o /tmp/liblbug.tar.gz "https://github.com/LadybugDB/ladybug/releases/latest/download/${ASSET}"
+              curl -fL -o /tmp/liblbug.tar.gz "${BASE_URL}/${ASSET}"
               mkdir -p /tmp/liblbug && tar -xzf /tmp/liblbug.tar.gz -C /tmp/liblbug
               find /tmp/liblbug -name '*.so*' -exec cp {} "$LIB_DIR/" \;
               ;;
             Darwin)
-              ASSET="liblbug-osx-universal.tar.gz"
+              case "$ARCH" in arm64) OARCH="arm64" ;; x86_64) OARCH="x86_64" ;; esac
+              ASSET="liblbug-osx-${OARCH}.tar.gz"
               LIB_DIR="$LBUG_DIR/lib/dynamic/darwin"
               mkdir -p "$LIB_DIR"
-              curl -L -o /tmp/liblbug.tar.gz "https://github.com/LadybugDB/ladybug/releases/latest/download/${ASSET}"
+              curl -fL -o /tmp/liblbug.tar.gz "${BASE_URL}/${ASSET}"
               mkdir -p /tmp/liblbug && tar -xzf /tmp/liblbug.tar.gz -C /tmp/liblbug
               find /tmp/liblbug -name '*.dylib' -exec cp {} "$LIB_DIR/" \;
               ;;
@@ -64,7 +78,7 @@ jobs:
               ASSET="liblbug-windows-x86_64.zip"
               LIB_DIR="$LBUG_DIR/lib/dynamic/windows"
               mkdir -p "$LIB_DIR"
-              curl -L -o /tmp/liblbug.zip "https://github.com/LadybugDB/ladybug/releases/latest/download/${ASSET}"
+              curl -fL -o /tmp/liblbug.zip "${BASE_URL}/${ASSET}"
               unzip -o /tmp/liblbug.zip -d /tmp/liblbug
               find /tmp/liblbug -name '*.dll' -o -name '*.lib' | xargs -I{} cp {} "$LIB_DIR/"
               ;;
@@ -109,7 +123,8 @@ jobs:
         run: |
           set -e
           OS=$(uname -s)
-          LBUG_DIR=$(go mod download -json github.com/LadybugDB/go-ladybug@v0.13.1 | grep '"Dir"' | cut -d'"' -f4)
+          LBUG_VER="${{ steps.lbug-version.outputs.version }}"
+          LBUG_DIR=$(go mod download -json github.com/LadybugDB/go-ladybug@${LBUG_VER} | grep '"Dir"' | cut -d'"' -f4)
           ARCHIVE_NAME=""
 
           case "$OS" in

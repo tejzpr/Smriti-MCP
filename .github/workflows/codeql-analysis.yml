@@ -40,31 +40,35 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Download dependencies and native library
+      run: |
+        set -e
+        go mod download
+        LBUG_VER=$(grep 'github.com/LadybugDB/go-ladybug' go.mod | awk '{print $2}')
+        LBUG_DIR=$(go mod download -json github.com/LadybugDB/go-ladybug@${LBUG_VER} | grep '"Dir"' | cut -d'"' -f4)
+        chmod -R u+w "$LBUG_DIR"
+        ARCH=$(uname -m)
+        case "$ARCH" in x86_64) GOARCH="amd64" ;; aarch64) GOARCH="arm64" ;; esac
+        ASSET="liblbug-linux-${ARCH}.tar.gz"
+        LIB_DIR="$LBUG_DIR/lib/dynamic/linux-${GOARCH}"
+        mkdir -p "$LIB_DIR"
+        curl -fL -o /tmp/liblbug.tar.gz "https://github.com/LadybugDB/ladybug/releases/download/${LBUG_VER}/${ASSET}"
+        mkdir -p /tmp/liblbug && tar -xzf /tmp/liblbug.tar.gz -C /tmp/liblbug
+        find /tmp/liblbug -name '*.so*' -exec cp {} "$LIB_DIR/" \;
+
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
+      uses: github/codeql-action/init@v4
       with:
         languages: ${{ matrix.language }}
-        # If you wish to specify custom queries, you can do so here or in a config file.
-        # By default, queries listed here will override any specified in a config file.
-        # Prefix the list here with "+" to use these queries and those in the config file.
-        # queries: ./path/to/local/query, your-org/your-repo/queries@main
 
-    # Autobuild attempts to build any compiled languages  (C/C++, C#, or Java).
-    # If this step fails, then you should remove it and run the build manually (see below)
-    - name: Autobuild
-      uses: github/codeql-action/autobuild@v3
-
-    # ℹ️ Command-line programs to run using the OS shell.
-    # 📚 https://git.io/JvXDl
-
-    # ✏️ If the Autobuild fails above, remove it and uncomment the following three lines
-    #    and modify them (or add more) to build your code if your project
-    #    uses a compiled language
-
-    #- run: |
-    #   make bootstrap
-    #   make release
+    - name: Build
+      run: go build ./...
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+      uses: github/codeql-action/analyze@v4
