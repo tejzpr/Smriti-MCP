@@ -96,6 +96,7 @@ func HandleSmritiRecall(engine *memory.Engine) func(ctx context.Context, request
 				"match_type":  r.MatchType,
 				"tags":        r.Engram.Tags,
 				"source":      r.Engram.Source,
+				"created_at":  r.Engram.CreatedAt,
 			})
 		}
 
