@@ -1,10 +1,9 @@
 //go:build integration
 
-/* SPDX-License-Identifier: MPL-2.0
- * Copyright 2026 Tejus Pratap <tejzpr@gmail.com>
- *
- * See CONTRIBUTORS.md for full contributor list.
- */
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright 2026 Tejus Pratap <tejzpr@gmail.com>
+//
+// See LICENSE file for details.
 
 package db
 

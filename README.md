@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go" alt="Go Version"></a>
-  <a href="https://opensource.org/licenses/MPL-2.0"><img src="https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg" alt="License: MPL 2.0"></a>
+  <a href="https://opensource.org/license/agpl-3-0"><img src="https://img.shields.io/badge/license-AGPL%20v3.0-green" alt="License: AGPL v3.0"></a>
   <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-Compatible-blue" alt="MCP"></a>
   <a href="https://hub.docker.com/r/tejzpr/smriti-mcp"><img src="https://img.shields.io/badge/Docker%20Hub-Container-blue?logo=docker" alt="Docker Hub"></a>
   <a href="https://github.com/tejzpr/smriti-mcp/actions"><img src="https://github.com/tejzpr/smriti-mcp/actions/workflows/codeql-analysis.yml/badge.svg" alt="CodeQL"></a>
