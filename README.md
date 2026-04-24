@@ -534,4 +534,6 @@ See [CONTRIBUTORS.md](CONTRIBUTORS.md) for the contributor list.
 
 ## License
 
-This project is licensed under the [Mozilla Public License 2.0](LICENSE).
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0) from v1.0.7 onwards.
+
+Versions prior to v1.0.7 were licensed under the [Mozilla Public License 2.0](LICENSE).
